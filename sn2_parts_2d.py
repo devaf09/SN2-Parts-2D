@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.3.0 (2026-10-18)  2 次元の照明 illumination（tilt・アダマール。区画どうしの干渉を消す）と Net2D(illum=...) を追加。
     0.2.0 (2026-10-17)  入力 image_to_field（振幅として・位相として）、1 本の光路 Net2D（板の形を 1 枚ごとに選べる）、
                         train・evaluate を追加。window_grid はレンズの後の中心（入力の平均の明るさ）を避けて窓を置く。
     0.1.0 (2026-10-17)  最初の版。格子、区画、板 ①②③ の位相、2 次元の回折（角スペクトル法・近軸）、レンズ、
@@ -35,7 +36,7 @@ import math
 
 import torch
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 # =============================================================================================
@@ -233,6 +234,27 @@ def image_to_field(img: torch.Tensor, mode: str = "amp") -> torch.Tensor:
     raise ValueError('mode は "amp" か "phase"')
 
 
+def illumination(L: int, blocks: int, kind: str = "tilt", device=None) -> torch.Tensor:
+    """2 次元の照明の符号 (P, L, L)。場を縦横 blocks × blocks の区画に分け、区画 m の光に、照明 j ごとに違う符号を掛ける。
+    P 通りの照明で明るさを平均すると、違う区画どうしの干渉（位置の雑音）がちょうど 0 になる（1 次元の実験10・11 の 2 次元版）。
+    tilt    : 符号 exp(j·2π·j·m / n)（n = blocks²）。照明の向きを少しずつ傾けるのと同じ。P = n
+    hadamard: アダマール行列の ±1（n は 2 の累乗）。位相 0 か π だけで作れる。P = n
+    計算は P 倍になる。"""
+    n = blocks * blocks
+    m = patch_index(L, L, blocks, blocks, device)                       # 各画素の区画番号 (L, L)
+    j = torch.arange(n, device=device, dtype=torch.float32)[:, None, None]
+    if kind == "tilt":
+        return torch.polar(torch.ones(n, L, L, device=device), 2 * math.pi * j * m[None] / n)
+    if kind == "hadamard":
+        if n & (n - 1):
+            raise ValueError("hadamard は blocks² が 2 の累乗のとき")
+        Hm = torch.ones(1, 1)
+        while Hm.shape[0] < n:
+            Hm = torch.cat([torch.cat([Hm, Hm], 1), torch.cat([Hm, -Hm], 1)], 0)
+        return Hm.to(device)[:, m].to(torch.complex64)
+    raise ValueError('kind は "tilt" か "hadamard"')
+
+
 # =============================================================================================
 # 7. 学習器（1 本の光路）
 # =============================================================================================
@@ -247,10 +269,11 @@ class Net2D(torch.nn.Module):
               "xy" = ① 交点で掛け算、"stripes" = ② 斜めの縞、"ripple" = ③ 等間隔の輪、"ripple2" = ③ ゾーンプレート
     patches : ②③ は縦横 patches × patches の区画、① は X 用・Y 用それぞれ patches² / 2 本の帯（学習する数をそろえる）
     学習するのは区画ごとの振幅 A と初期位相 φ、窓ごとの背景光、全体の温度だけ。
-    ω・k・中心・楕円は固定の乱数（Sin-CNN2 では ω 固定でよかった）。freeze=True なら板は学習しない（比較用）。"""
+    ω・k・中心・楕円は固定の乱数（Sin-CNN2 では ω 固定でよかった）。freeze=True なら板は学習しない（比較用）。
+    illum   : (blocks, kind) を与えると、2 次元の照明（illumination）で位置の雑音を消す。計算は blocks² 倍。"""
 
     def __init__(self, L: int, n_classes: int, plates=("stripes",) * 16, patches: int = 8, z: float = 64.0,
-                 seed: int = 0, window: int = 4, freeze: bool = False):
+                 seed: int = 0, window: int = 4, freeze: bool = False, illum=None):
         super().__init__()
         self.L, self.kinds = L, list(plates)
         if any(k not in PLATE_KINDS for k in self.kinds):
@@ -285,6 +308,7 @@ class Net2D(torch.nn.Module):
         self.register_buffer("det", window_grid(L, L, n_classes, window))
         self.gain = torch.nn.Parameter(torch.tensor(5.0))                  # 明るさ → スコアの倍率（温度）
         self.bias = torch.nn.Parameter(torch.zeros(n_classes))            # 窓ごとの背景光
+        self.register_buffer("illum", None if illum is None else illumination(L, *illum))
 
     def plate_phase(self, d: int) -> torch.Tensor:
         """板 d の位相の遅れ (L, L)。"""
@@ -300,10 +324,14 @@ class Net2D(torch.nn.Module):
                             self.pid, self.y, self.x, power=pw)
 
     def screen(self, u: torch.Tensor) -> torch.Tensor:
-        """光の場 (N, L, L) → レンズの後の明るさ (N, L, L)（平均 1）。"""
+        """光の場 (N, L, L) → レンズの後の明るさ (N, L, L)（平均 1）。照明があれば照明ごとの明るさを平均する。"""
+        if self.illum is not None:
+            u = u[:, None] * self.illum[None]                              # (N, P, L, L)
         for d in range(len(self.kinds)):
             u = normalize(propagate(apply_plate(u, self.plate_phase(d)), self.H))
         I = intensity(lens(u))
+        if self.illum is not None:
+            I = I.mean(1)
         return I / (I.mean((-2, -1), keepdim=True) + 1e-12)
 
     def forward(self, u: torch.Tensor) -> torch.Tensor:

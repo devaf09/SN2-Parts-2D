@@ -93,3 +93,23 @@ def test_net2d_forward_all_kinds():
         assert out.shape == (3, 5) and torch.isfinite(out).all()
         n = n or net.n_params()
         assert net.n_params() == n
+
+
+def test_illumination_cancels_cross_block_interference():
+    """照明で平均すると、明るさは区画ごとに別々に通した明るさの和になる（違う区画どうしの干渉が消える）。"""
+    torch.manual_seed(0)
+    L, b = 16, 2
+    for kind in ("tilt", "hadamard"):
+        net = p2.Net2D(L, 3, ["stripes"] * 2, patches=2, illum=(b, kind))
+        u = _rand_field(1, L, L)
+        m = p2.patch_index(L, L, b, b)
+        H = net.H
+
+        def raw(v):   # 正規化なしの光路（線形）
+            for d in range(2):
+                v = p2.propagate(p2.apply_plate(v, net.plate_phase(d)), H)
+            return p2.intensity(p2.lens(v))
+        with torch.no_grad():
+            avg = raw(u[:, None] * net.illum[None]).mean(1)
+            sep = sum(raw(u * (m == k)) for k in range(b * b))
+        assert torch.allclose(avg, sep, rtol=1e-3, atol=1e-4)

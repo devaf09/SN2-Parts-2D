@@ -51,6 +51,7 @@ def main():
     ap.add_argument("--patches", type=int, default=8)
     ap.add_argument("--z", type=float, default=64.0)
     ap.add_argument("--input", default="amp", choices=["amp", "phase"])
+    ap.add_argument("--illum", default=None, help="2 次元の照明。例 tilt:2（縦横 2 × 2 の区画、4 通り）、hadamard:4")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp01.txt")
     a = ap.parse_args()
@@ -62,7 +63,8 @@ def main():
     torch.manual_seed(a.seed)
     if a.method in PLATES:
         net = p2.Net2D(a.L, C, PLATES[a.method], patches=a.patches, z=a.z, seed=a.seed,
-                       freeze=(a.method == "random")).to(dev)
+                       freeze=(a.method == "random"),
+                       illum=None if a.illum is None else (int(a.illum.split(":")[1]), a.illum.split(":")[0])).to(dev)
         to_input = lambda v: p2.image_to_field(v, a.input)
         n_params = net.n_params()
         lr = a.lr
