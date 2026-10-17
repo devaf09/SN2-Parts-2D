@@ -1,0 +1,19 @@
+# データセット（取得元・ライセンスは README に書く。データ自体は入れない）
+data/
+# 学習済みの重み
+*.pt
+*.pth
+results/models/
+# 作業の記録・持ち主向けのプロンプト
+session_records/
+.claude/
+docs/*_prompt.md
+# 秘密（トークン・鍵）
+.env
+*.env
+*.key
+*.pem
+# Python・テストの一時ファイル
+__pycache__/
+*.pyc
+.pytest_cache/
