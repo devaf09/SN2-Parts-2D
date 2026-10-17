@@ -81,3 +81,15 @@ def test_window_grid():
     assert torch.allclose(det.sum((1, 2)), torch.ones(10))
     I = torch.ones(3, 32, 32)
     assert torch.allclose(p2.read_windows(I, det), torch.ones(3, 10))
+
+
+def test_net2d_forward_all_kinds():
+    """どの板の形でも、スコアの形がそろい、学習する数が同じ。"""
+    X = torch.rand(3, 32, 32)
+    n = None
+    for k in p2.PLATE_KINDS:
+        net = p2.Net2D(32, 5, [k] * 2, patches=4)
+        out = net(p2.image_to_field(X, "phase"))
+        assert out.shape == (3, 5) and torch.isfinite(out).all()
+        n = n or net.n_params()
+        assert net.n_params() == n
