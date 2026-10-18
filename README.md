@@ -148,4 +148,8 @@ python tools/summarize.py results/exp01.txt --rows method --cols task
 
 [MIT License](LICENSE)（Copyright (c) 2026 devaf09）。`vendor/` のコードは Sin-CNN2（MIT、同じ著作権者）からの写しです。
 
-データ: いまの実験はすべてプログラムの中で作った入力を使い、外部のデータセットは使っていません。データセットを使うときは、ここに出典とライセンスを書きます（データ自体はリポジトリに入れません）。
+データ:
+- 合成課題（実験00〜14）はすべてプログラムの中で作った入力です。
+- **MNIST**（手書き数字、実験15〜）: Yann LeCun, Corinna Cortes。ライセンス CC BY-SA 3.0。torchvision の置き場から `python tools/fetch_mnist.py mnist` で `data/` に取得します。
+- **Fashion-MNIST**（服の絵、実験15〜）: Zalando Research（[github.com/zalandoresearch/fashion-mnist](https://github.com/zalandoresearch/fashion-mnist)）。ライセンス MIT。`python tools/fetch_mnist.py fashion` で取得します。
+- データ自体はリポジトリに入れていません（`data/` は .gitignore）。
