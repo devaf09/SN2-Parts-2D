@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--n_ripples", type=int, default=None)
     ap.add_argument("--sinc_depth", type=float, default=1.0)
+    ap.add_argument("--sched", default="const", choices=["const", "cosine"], help="学習率の変え方（cosine は 0 まで下げる。実験17）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp16.txt")
     a = ap.parse_args()
@@ -55,6 +56,7 @@ def main():
         f, n_params = (lambda v: v), sum(p.numel() for p in net.parameters())
         lr = 0.003 if a.method in ("logreg", "lens_logreg", "mlp") else a.lr
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps) if a.sched == "cosine" else None
     g = torch.Generator().manual_seed(a.seed)
     curve, t_train = [], 0.0
     for step in range(1, a.steps + 1):
@@ -66,6 +68,8 @@ def main():
         opt.zero_grad()
         loss.backward()
         opt.step()
+        if sched is not None:
+            sched.step()
         if dev.type == "cuda":
             torch.cuda.synchronize()
         t_train += time.perf_counter() - t0
