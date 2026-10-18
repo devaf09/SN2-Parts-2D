@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.6.0 (2026-10-18)  融合のための「担当なし」の学習: generic_images と train(reject=...)（実験10。足すだけの融合 80.8 → 100%）。
     0.5.0 (2026-10-18)  ④ 減衰する波紋の板 plate_sinc（持ち主の案。深さ・幅・中心だけで決まる波紋を板 1 枚に複数）と Net2D の "sinc"。
     0.4.0 (2026-10-18)  組み立て: merge（並列光路の融合・取消）、derive・combine（共通の出発点からの足し算・引き算）。
     0.3.0 (2026-10-18)  2 次元の照明 illumination（tilt・アダマール。区画どうしの干渉を消す）と Net2D(illum=...) を追加。
@@ -38,7 +39,7 @@ import math
 
 import torch
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 
 # =============================================================================================
@@ -384,9 +385,36 @@ def _device(net: torch.nn.Module):
     return torch.device("cpu")
 
 
+def generic_images(n: int, L: int = 64, seed: int = 0, noise: float = 0.1) -> torch.Tensor:
+    """どの課題とも関係のない一般の絵 (n, L, L)（0〜1）。融合する技能に「担当なし」として見せる（実験10）。
+    前半はぼやけた塊 1〜3 個、後半はぼかした雑音を切ったまだらの模様（中央付近）。線や形は描かない。"""
+    g = torch.Generator().manual_seed(seed)
+    yy = torch.arange(L, dtype=torch.float32)[None, :, None]
+    xx = torch.arange(L, dtype=torch.float32)[None, None, :]
+    img = torch.zeros(n, L, L)
+    h = n // 2
+    for _ in range(3):
+        on = (torch.rand(h, generator=g) < 0.7).float()[:, None, None]
+        cx = L / 2 + (torch.rand(h, generator=g) - 0.5) * 0.6 * L
+        cy = L / 2 + (torch.rand(h, generator=g) - 0.5) * 0.6 * L
+        sg = (2 + 6 * torch.rand(h, generator=g)) * L / 64
+        img[:h] += on * torch.exp(-((xx - cx[:, None, None]) ** 2 + (yy - cy[:, None, None]) ** 2) / (2 * sg[:, None, None] ** 2))
+    k = torch.exp(-(torch.arange(-6, 7, dtype=torch.float32) ** 2) / 8)
+    k = k / k.sum()
+    z = torch.randn(n - h, 1, L, L, generator=g)
+    z = torch.nn.functional.conv2d(z, k[None, None, :, None], padding=(6, 0))
+    z = torch.nn.functional.conv2d(z, k[None, None, None, :], padding=(0, 6))[:, 0]
+    env = torch.exp(-((xx - L / 2) ** 2 + (yy - L / 2) ** 2) / (2 * (L / 6) ** 2))
+    img[h:] = (z > 0.5 * z.std()).float() * env[0]
+    return (img + noise * torch.randn(n, L, L, generator=g)).clamp(0, 1)
+
+
 def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1500, lr: float = 0.01,
-          batch_size: int = 256, seed: int = 0, to_input=None) -> torch.nn.Module:
-    """クロスエントロピーで学習する（Adam）。X の一部を to_input で変換してから net に渡す（例: image_to_field）。"""
+          batch_size: int = 256, seed: int = 0, to_input=None, reject: torch.Tensor | None = None,
+          reject_weight: float = 1.0) -> torch.nn.Module:
+    """クロスエントロピーで学習する（Adam）。X の一部を to_input で変換してから net に渡す（例: image_to_field）。
+    reject に「担当なし」の絵（generic_images）を渡すと、それを見たときはどの窓も同じ明るさになる（答えを出さない）ようにも学ぶ。
+    融合する技能はこれで学習しておくと、相手のデータなしで足すだけの融合が成り立つ（実験10: 80.8 → 100%）。"""
     dev = _device(net)
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
     g = torch.Generator().manual_seed(seed)
@@ -394,6 +422,9 @@ def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1
     for _ in range(steps):
         idx = torch.randint(len(X), (batch_size,), generator=g)
         loss = torch.nn.functional.cross_entropy(net(to_input(X[idx].to(dev))), y[idx].to(dev))
+        if reject is not None:
+            j = torch.randint(len(reject), (batch_size // 2,), generator=g)
+            loss = loss - reject_weight * torch.nn.functional.log_softmax(net(to_input(reject[j].to(dev))), 1).mean()
         opt.zero_grad()
         loss.backward()
         opt.step()
