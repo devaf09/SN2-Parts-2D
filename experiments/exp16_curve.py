@@ -41,6 +41,9 @@ def main():
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--n_ripples", type=int, default=None)
     ap.add_argument("--sinc_depth", type=float, default=1.0)
+    ap.add_argument("--lr_center", type=float, default=1.0, help="④⑤ の波紋の中心の学習率の倍率（実験18）")
+    ap.add_argument("--lr_width", type=float, default=1.0, help="④⑤ の波紋の幅 k の学習率の倍率（実験18）")
+    ap.add_argument("--sinc_centers", default="random", choices=["random", "grid", "jitter"], help="波紋の中心の初期配置（実験19）")
     ap.add_argument("--sched", default="const", choices=["const", "cosine"], help="学習率の変え方（cosine は 0 まで下げる。実験17）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp16.txt")
@@ -49,13 +52,19 @@ def main():
     Xtr, ytr, Xte, yte = load(a.data, 64)
     torch.manual_seed(a.seed)
     if a.method in PLATES:
-        net = p2.Net2D(64, 10, PLATES[a.method], seed=a.seed, n_ripples=a.n_ripples, sinc_depth=a.sinc_depth).to(dev)
+        net = p2.Net2D(64, 10, PLATES[a.method], seed=a.seed, n_ripples=a.n_ripples, sinc_depth=a.sinc_depth,
+                        sinc_centers=a.sinc_centers).to(dev)
         f, n_params, lr = (lambda v: p2.image_to_field(v, "amp")), net.n_params(), a.lr
     else:
         net = BASELINES[a.method](64, 10).to(dev)
         f, n_params = (lambda v: v), sum(p.numel() for p in net.parameters())
         lr = 0.003 if a.method in ("logreg", "lens_logreg", "mlp") else a.lr
-    opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
+    groups = {"center": [], "width": [], "other": []}
+    for name, p in net.named_parameters():
+        if p.requires_grad:
+            groups["center" if name in ("scx", "scy") else "width" if name == "sk" else "other"].append(p)
+    mult = {"center": a.lr_center, "width": a.lr_width, "other": 1.0}
+    opt = torch.optim.Adam([{"params": v, "lr": lr * mult[k]} for k, v in groups.items() if v], lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps) if a.sched == "cosine" else None
     g = torch.Generator().manual_seed(a.seed)
     curve, t_train = [], 0.0

@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.8.0 (2026-10-19)  Net2D(sinc_centers=...): ④⑤ の波紋の中心の初期配置（でたらめ・格子・格子 + ずらし）。
     0.7.0 (2026-10-18)  ⑤ 楕円で大きさを変えられる減衰する波紋 plate_sinc_ellipse（持ち主の案）と Net2D の "sinc_e"。
                         Net2D(sinc_depth=...) で ④ の初期の深さを変えられる。
     0.6.0 (2026-10-18)  融合のための「担当なし」の学習: generic_images と train(reject=...)（実験10。足すだけの融合 80.8 → 100%）。
@@ -41,7 +42,7 @@ import math
 
 import torch
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 
 # =============================================================================================
@@ -304,13 +305,15 @@ class Net2D(torch.nn.Module):
     illum   : (blocks, kind) を与えると、2 次元の照明（illumination）で位置の雑音を消す。計算は blocks² 倍。
     "sinc"  : ④ 減衰する波紋（plate_sinc）。区画に分けず、板 1 枚に n_ripples 個の波紋。深さ・幅・中心の位置をすべて学習する。
               n_ripples を省略すると patches² / 2（学習する数を ①②③ とそろえる: 波紋 1 つ 4 個 = 区画 2 つ分）。
-              sinc_depth は初期の深さの倍率（既定 1 で深さ 1〜3。波紋が多いときは小さくする、実験13）
+              sinc_depth は初期の深さの倍率（既定 1 で深さ 1〜3。波紋が多いときは小さくする、実験13）。
+              sinc_centers は波紋の中心の初期配置: "random"（既定）/ "grid"（格子）/ "jitter"（格子から少しずらす）
     "sinc_e": ⑤ 楕円で大きさを変えられる減衰する波紋（plate_sinc_ellipse）。波紋 1 つ 7 個の数。
               n_ripples を省略すると patches² · 2 / 7（学習する数を ①②③④ とそろえる）"""
 
     def __init__(self, L: int, n_classes: int, plates=("stripes",) * 16, patches: int = 8, z: float = 64.0,
                  seed: int = 0, window: int = 4, freeze: bool = False, illum=None,
-                 n_ripples: int | None = None, sinc_depth: float = 1.0):
+                 n_ripples: int | None = None, sinc_depth: float = 1.0,
+                 sinc_centers: str = "random"):
         super().__init__()
         self.L, self.kinds = L, list(plates)
         if any(k not in PLATE_KINDS for k in self.kinds):
@@ -356,6 +359,21 @@ class Net2D(torch.nn.Module):
                                      requires_grad=not freeze)                                    # 幅（輪の細かさ）
         self.scx = torch.nn.Parameter(L * (2 * rs(Ds, M) - 0.5), requires_grad=not freeze)       # 中心（場の外でもよい）
         self.scy = torch.nn.Parameter(L * (2 * rs(Ds, M) - 0.5), requires_grad=not freeze)
+        if sinc_centers != "random" and Ds:      # 波紋の中心を格子に並べる（"grid"）か、格子から少しずらす（"jitter"）
+            n = math.ceil(math.sqrt(M))
+            step = 2 * L / n                     # でたらめのときと同じ範囲 −0.5L〜1.5L を覆う
+            gy, gx = torch.meshgrid(torch.arange(n), torch.arange(n), indexing="ij")
+            cx0 = (-0.5 * L + (gx.flatten()[:M].float() + 0.5) * step)[None].repeat(Ds, 1)
+            cy0 = (-0.5 * L + (gy.flatten()[:M].float() + 0.5) * step)[None].repeat(Ds, 1)
+            if sinc_centers == "jitter":
+                gj = torch.Generator().manual_seed(seed + 15485863)
+                cx0 = cx0 + (torch.rand(Ds, M, generator=gj) - 0.5) * 0.5 * step
+                cy0 = cy0 + (torch.rand(Ds, M, generator=gj) - 0.5) * 0.5 * step
+            elif sinc_centers != "grid":
+                raise ValueError('sinc_centers は "random" / "grid" / "jitter"')
+            with torch.no_grad():
+                self.scx.copy_(cx0)
+                self.scy.copy_(cy0)
         # ⑤ の楕円と大きさ（さらに別の乱数の列。④ の初期値を変えないため）
         ge = torch.Generator().manual_seed(seed + 104729)
         re = lambda *s: torch.rand(*s, generator=ge)
