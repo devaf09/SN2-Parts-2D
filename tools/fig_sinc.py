@@ -69,24 +69,26 @@ else:
         ck = torch.load(path, map_location="cpu", weights_only=False)
         a = ck["args"]
         kinds = PLATES[a["method"]]
-        net = p2.Net2D(a["L"], ck["classes"], kinds, patches=a["patches"], z=a["z"], seed=a["seed"], n_ripples=a.get("n_ripples"))
-        init = p2.Net2D(a["L"], ck["classes"], kinds, patches=a["patches"], z=a["z"], seed=a["seed"], n_ripples=a.get("n_ripples"))
+        net = p2.Net2D(a.get("L", 64), ck["classes"], kinds, patches=a.get("patches", 8), z=a.get("z", 64.0), seed=a["seed"],
+                        n_ripples=a.get("n_ripples"), sinc_depth=a.get("sinc_depth", 1.0))
+        init = p2.Net2D(a.get("L", 64), ck["classes"], kinds, patches=a.get("patches", 8), z=a.get("z", 64.0), seed=a["seed"],
+                        n_ripples=a.get("n_ripples"), sinc_depth=a.get("sinc_depth", 1.0))
         net.load_state_dict(ck["state"])
         show = [d for d in range(len(kinds)) if kinds[d] == "sinc"][:4] or list(range(4))
         fig, ax = plt.subplots(2, len(show), figsize=(3.2 * len(show), 6.4))
         for c, d in enumerate(show):
             for r, (m, t) in enumerate([(init, "学習前"), (net, "学習後")]):
                 with torch.no_grad():
-                    ax[r, c].imshow(m.plate_phase(d), cmap="twilight", extent=(-0.5, a["L"] - 0.5, a["L"] - 0.5, -0.5))
+                    ax[r, c].imshow(m.plate_phase(d), cmap="twilight", extent=(-0.5, a.get("L", 64) - 0.5, a.get("L", 64) - 0.5, -0.5))
                     if kinds[d] == "sinc":
                         i = m.sinc_layers.index(d)
                         ax[r, c].scatter(m.scx[i].numpy(), m.scy[i].numpy(), s=6, c="k")
-                ax[r, c].set_xlim(-0.5, a["L"] - 0.5)
-                ax[r, c].set_ylim(a["L"] - 0.5, -0.5)
+                ax[r, c].set_xlim(-0.5, a.get("L", 64) - 0.5)
+                ax[r, c].set_ylim(a.get("L", 64) - 0.5, -0.5)
                 ax[r, c].set_title(f"板 {d + 1}（{t}）", fontsize=9)
                 ax[r, c].axis("off")
         name = os.path.splitext(os.path.basename(path))[0]
-        fig.suptitle(f"学習した板: {a['task']}・{a['method']}・seed {a['seed']}（黒い点 = 場の中にある波紋の中心）")
+        fig.suptitle(f"学習した板: {a.get('task', a.get('data'))}・{a['method']}・seed {a['seed']}（黒い点 = 場の中にある波紋の中心）")
         fig.tight_layout()
         out = os.path.join(OUT, f"{name}_plates.png")
         fig.savefig(out, dpi=100, bbox_inches="tight")
