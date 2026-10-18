@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.4.0 (2026-10-18)  組み立て: merge（並列光路の融合・取消）、derive・combine（共通の出発点からの足し算・引き算）。
     0.3.0 (2026-10-18)  2 次元の照明 illumination（tilt・アダマール。区画どうしの干渉を消す）と Net2D(illum=...) を追加。
     0.2.0 (2026-10-17)  入力 image_to_field（振幅として・位相として）、1 本の光路 Net2D（板の形を 1 枚ごとに選べる）、
                         train・evaluate を追加。window_grid はレンズの後の中心（入力の平均の明るさ）を避けて窓を置く。
@@ -36,7 +37,7 @@ import math
 
 import torch
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 # =============================================================================================
@@ -374,3 +375,53 @@ def evaluate(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, batch_size:
     for i in range(0, len(X), batch_size):
         ok += (net(to_input(X[i:i + batch_size].to(dev))).argmax(1).cpu() == y[i:i + batch_size]).sum().item()
     return 100.0 * ok / len(X)
+
+
+# =============================================================================================
+# 8. 組み立て: 融合・取消・足し算・引き算（Sin-CNN2 の merge・combine・derive の 2 次元版）
+# =============================================================================================
+# 技能ごとに 1 本の光路（Net2D）を持たせる。窓の総数 n_classes は融合する技能どうしでそろえ、
+# 各技能は自分の担当の窓（クラス）だけをラベルにして学習する（他の窓は暗くなるように学ぶ）。
+
+class Merged(torch.nn.Module):
+    """別々に学習した光路を並べたもの。光路どうしは干渉しない（色や偏光の違い）と考え、スクリーンでは明るさを足すだけ。
+    融合に追加の学習は要らず、光路を外せば完全に元に戻る（取消）。"""
+
+    def __init__(self, nets):
+        super().__init__()
+        if not nets:
+            raise ValueError("光路が空")
+        if len({(n.L, n.det.shape) for n in nets}) != 1:
+            raise ValueError("融合する光路どうしで場の大きさと窓の数をそろえる")
+        self.nets = torch.nn.ModuleList(nets)
+        self.det = nets[0].det
+
+    def forward(self, u: torch.Tensor) -> torch.Tensor:
+        return sum(n(u) for n in self.nets) / len(self.nets)      # 各光路のスコアの平均（＝明るさの平均）
+
+
+def merge(nets) -> Merged:
+    """融合。取消は、外したい光路を除いたリストで merge し直せばよい（残りは元と完全に同じ）。"""
+    return Merged(list(nets))
+
+
+def derive(base: torch.nn.Module) -> torch.nn.Module:
+    """base を共通の出発点として、そのコピーを作る（あとで別のデータで train する）。"""
+    import copy
+    return copy.deepcopy(base)
+
+
+def combine(base: torch.nn.Module, terms) -> torch.nn.Module:
+    """光路の足し算・引き算: base + Σ 係数 × (技能 − base) を 1 本の光路として作る（計算は増えない）。
+    技能は derive(base) を学習したもの。共通の出発点が必要（1 次元の実験23）。"""
+    import copy
+    for _, t in terms:
+        for (n1, b1), (n2, b2) in zip(base.named_buffers(), t.named_buffers()):
+            if b1 is not None and not torch.equal(b1, b2):
+                raise ValueError(f"共通の出発点（derive で作ったもの）どうしでないと足し引きできない（{n1} が違う）")
+    out = copy.deepcopy(base)
+    bp = dict(base.named_parameters())
+    with torch.no_grad():
+        for name, p in out.named_parameters():
+            p.copy_(bp[name] + sum(c * (dict(t.named_parameters())[name] - bp[name]) for c, t in terms))
+    return out
