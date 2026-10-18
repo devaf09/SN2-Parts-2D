@@ -92,7 +92,10 @@ def test_net2d_forward_all_kinds():
         out = net(p2.image_to_field(X, "phase"))
         assert out.shape == (3, 5) and torch.isfinite(out).all()
         n = n or net.n_params()
-        assert net.n_params() == n
+        if k == "sinc_e":   # 波紋 1 つ 7 個の数なので、ちょうどにはそろわない
+            assert abs(net.n_params() - n) <= 0.15 * n
+        else:
+            assert net.n_params() == n
 
 
 def test_illumination_cancels_cross_block_interference():

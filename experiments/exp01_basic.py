@@ -34,6 +34,7 @@ PLATES = {
     "mix_xy_ripple": ["xy"] * 8 + ["ripple"] * 8,
     "sinc": ["sinc"] * 16,         # ④ 減衰する波紋（持ち主の案、実験11）
     "mix_xy_sinc": ["xy"] * 8 + ["sinc"] * 8,
+    "sinc_e": ["sinc_e"] * 16,     # ⑤ 楕円で大きさを変えられる減衰する波紋（持ち主の案、実験14）
     "random": ["stripes"] * 16,    # 板は学習しない
     "lens": [],                    # 板 0 枚
 }
@@ -54,6 +55,7 @@ def main():
     ap.add_argument("--z", type=float, default=64.0)
     ap.add_argument("--input", default="amp", choices=["amp", "phase"])
     ap.add_argument("--n_ripples", type=int, default=None, help="④ の板 1 枚あたりの波紋の数（省略時は区画² / 2）")
+    ap.add_argument("--sinc_depth", type=float, default=1.0, help="④ の初期の深さの倍率")
     ap.add_argument("--save", default=None, help="学習した光路を保存するファイル（results/models/ の下。リポジトリには入れない）")
     ap.add_argument("--illum", default=None, help="2 次元の照明。例 tilt:2（縦横 2 × 2 の区画、4 通り）、hadamard:4")
     ap.add_argument("--device", default="cuda")
@@ -67,7 +69,7 @@ def main():
     torch.manual_seed(a.seed)
     if a.method in PLATES:
         net = p2.Net2D(a.L, C, PLATES[a.method], patches=a.patches, z=a.z, seed=a.seed,
-                       freeze=(a.method == "random"), n_ripples=a.n_ripples,
+                       freeze=(a.method == "random"), n_ripples=a.n_ripples, sinc_depth=a.sinc_depth,
                        illum=None if a.illum is None else (int(a.illum.split(":")[1]), a.illum.split(":")[0])).to(dev)
         to_input = lambda v: p2.image_to_field(v, a.input)
         n_params = net.n_params()

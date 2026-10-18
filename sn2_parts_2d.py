@@ -22,6 +22,8 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.7.0 (2026-10-18)  ⑤ 楕円で大きさを変えられる減衰する波紋 plate_sinc_ellipse（持ち主の案）と Net2D の "sinc_e"。
+                        Net2D(sinc_depth=...) で ④ の初期の深さを変えられる。
     0.6.0 (2026-10-18)  融合のための「担当なし」の学習: generic_images と train(reject=...)（実験10。足すだけの融合 80.8 → 100%）。
     0.5.0 (2026-10-18)  ④ 減衰する波紋の板 plate_sinc（持ち主の案。深さ・幅・中心だけで決まる波紋を板 1 枚に複数）と Net2D の "sinc"。
     0.4.0 (2026-10-18)  組み立て: merge（並列光路の融合・取消）、derive・combine（共通の出発点からの足し算・引き算）。
@@ -39,7 +41,7 @@ import math
 
 import torch
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 
 # =============================================================================================
@@ -115,6 +117,22 @@ def plate_sinc(A, k, cx, cy, y, x) -> torch.Tensor:
     r = torch.sqrt((x[None] - cx[:, None, None]) ** 2 + (y[None] - cy[:, None, None]) ** 2 + 1e-12)
     u = k[:, None, None] * r
     return (A[:, None, None] * torch.where(u.abs() < 1e-4, torch.ones_like(u), torch.sin(u) / u)).sum(0)
+
+
+def plate_sinc_ellipse(A, k, cx, cy, q, th, log_s, y, x) -> torch.Tensor:
+    """⑤ 楕円の減衰する波紋（持ち主の案、2026-10-18）の位相 (Ly, Lx)。④ に「楕円」と「大きさ（届く範囲）」を足したもの。
+        ρ_m = √((x'·e^(−q/2))² + (y'·e^(q/2))²)  （(x', y') は中心から見た座標を角度 θ だけ回したもの。e^q が楕円の縦横の比、面積は変えない）
+        位相の遅れ = Σ_m A_m · sin(k_m·ρ_m) / (k_m·ρ_m) · exp(−(ρ_m / s_m)²)   （s_m = e^(log_s) が波紋の届く大きさ）
+    幅 k（輪の間隔）と大きさ s（どこまで広がるか）を別々に決められる。波紋 1 つは A・k・cx・cy・q・θ・log_s の 7 つの数。"""
+    dx, dy = x[None] - cx[:, None, None], y[None] - cy[:, None, None]
+    c, sn = torch.cos(th)[:, None, None], torch.sin(th)[:, None, None]
+    xr, yr = c * dx + sn * dy, -sn * dx + c * dy
+    h = (q / 2)[:, None, None]
+    rho = torch.sqrt((xr * torch.exp(-h)) ** 2 + (yr * torch.exp(h)) ** 2 + 1e-12)
+    u = k[:, None, None] * rho
+    sinc = torch.where(u.abs() < 1e-4, torch.ones_like(u), torch.sin(u) / u)
+    env = torch.exp(-(rho / torch.exp(log_s)[:, None, None]) ** 2)
+    return (A[:, None, None] * sinc * env).sum(0)
 
 
 def apply_plate(u: torch.Tensor, phase: torch.Tensor) -> torch.Tensor:
@@ -272,7 +290,7 @@ def illumination(L: int, blocks: int, kind: str = "tilt", device=None) -> torch.
 # 7. 学習器（1 本の光路）
 # =============================================================================================
 
-PLATE_KINDS = ("xy", "stripes", "ripple", "ripple2", "sinc")
+PLATE_KINDS = ("xy", "stripes", "ripple", "ripple2", "sinc", "sinc_e")
 
 
 class Net2D(torch.nn.Module):
@@ -285,11 +303,14 @@ class Net2D(torch.nn.Module):
     ω・k・中心・楕円は固定の乱数（Sin-CNN2 では ω 固定でよかった）。freeze=True なら板は学習しない（比較用）。
     illum   : (blocks, kind) を与えると、2 次元の照明（illumination）で位置の雑音を消す。計算は blocks² 倍。
     "sinc"  : ④ 減衰する波紋（plate_sinc）。区画に分けず、板 1 枚に n_ripples 個の波紋。深さ・幅・中心の位置をすべて学習する。
-              n_ripples を省略すると patches² / 2（学習する数を ①②③ とそろえる: 波紋 1 つ 4 個 = 区画 2 つ分）"""
+              n_ripples を省略すると patches² / 2（学習する数を ①②③ とそろえる: 波紋 1 つ 4 個 = 区画 2 つ分）。
+              sinc_depth は初期の深さの倍率（既定 1 で深さ 1〜3。波紋が多いときは小さくする、実験13）
+    "sinc_e": ⑤ 楕円で大きさを変えられる減衰する波紋（plate_sinc_ellipse）。波紋 1 つ 7 個の数。
+              n_ripples を省略すると patches² · 2 / 7（学習する数を ①②③④ とそろえる）"""
 
     def __init__(self, L: int, n_classes: int, plates=("stripes",) * 16, patches: int = 8, z: float = 64.0,
                  seed: int = 0, window: int = 4, freeze: bool = False, illum=None,
-                 n_ripples: int | None = None):
+                 n_ripples: int | None = None, sinc_depth: float = 1.0):
         super().__init__()
         self.L, self.kinds = L, list(plates)
         if any(k not in PLATE_KINDS for k in self.kinds):
@@ -325,16 +346,22 @@ class Net2D(torch.nn.Module):
         self.gain = torch.nn.Parameter(torch.tensor(5.0))                  # 明るさ → スコアの倍率（温度）
         self.bias = torch.nn.Parameter(torch.zeros(n_classes))            # 窓ごとの背景光
         # ④ 減衰する波紋の数（別の乱数の列から作る。ほかの形の板の初期値を変えないため）
-        self.sinc_layers = [d for d, k in enumerate(self.kinds) if k == "sinc"]
-        M = n_ripples or P2 // 2
+        self.sinc_layers = [d for d, k in enumerate(self.kinds) if k in ("sinc", "sinc_e")]
+        M = n_ripples or (P2 * 2 // 7 if "sinc_e" in self.kinds else P2 // 2)
         gs = torch.Generator().manual_seed(seed + 7919)
         rs = lambda *s: torch.rand(*s, generator=gs)
         Ds = max(len(self.sinc_layers), 1) if self.sinc_layers else 0
-        self.sA = torch.nn.Parameter(1.0 + 2.0 * rs(Ds, M), requires_grad=not freeze)           # 深さ（中心での位相の遅れ）
+        self.sA = torch.nn.Parameter(sinc_depth * (1.0 + 2.0 * rs(Ds, M)), requires_grad=not freeze)   # 深さ（中心での位相の遅れ）
         self.sk = torch.nn.Parameter(torch.exp(math.log(2 * math.pi / L) + (math.log(math.pi / 2) - math.log(2 * math.pi / L)) * rs(Ds, M)),
                                      requires_grad=not freeze)                                    # 幅（輪の細かさ）
         self.scx = torch.nn.Parameter(L * (2 * rs(Ds, M) - 0.5), requires_grad=not freeze)       # 中心（場の外でもよい）
         self.scy = torch.nn.Parameter(L * (2 * rs(Ds, M) - 0.5), requires_grad=not freeze)
+        # ⑤ の楕円と大きさ（さらに別の乱数の列。④ の初期値を変えないため）
+        ge = torch.Generator().manual_seed(seed + 104729)
+        re = lambda *s: torch.rand(*s, generator=ge)
+        self.sq = torch.nn.Parameter(1.4 * re(Ds, M) - 0.7, requires_grad=not freeze)                  # 楕円の縦横の比 e^q（0.5〜2 倍）
+        self.sth = torch.nn.Parameter(math.pi * re(Ds, M), requires_grad=not freeze)                  # 楕円の角度
+        self.slog_s = torch.nn.Parameter(math.log(L) + re(Ds, M) - 0.5, requires_grad=not freeze)     # 大きさ（届く範囲 0.6L〜1.6L）
         self.register_buffer("illum", None if illum is None else illumination(L, *illum))
 
     def plate_phase(self, d: int) -> torch.Tensor:
@@ -343,6 +370,10 @@ class Net2D(torch.nn.Module):
         if k == "sinc":
             i = self.sinc_layers.index(d)
             return plate_sinc(self.sA[i], self.sk[i], self.scx[i], self.scy[i], self.y, self.x)
+        if k == "sinc_e":
+            i = self.sinc_layers.index(d)
+            return plate_sinc_ellipse(self.sA[i], self.sk[i], self.scx[i], self.scy[i], self.sq[i], self.sth[i],
+                                      self.slog_s[i], self.y, self.x)
         if k == "xy":
             c = self.x[0]
             return plate_xy(A[:nb], self.w1[d, :nb], phi[:nb], self.band,
@@ -372,8 +403,8 @@ class Net2D(torch.nn.Module):
         """学習する数（使っている板の数だけ。背景光、温度を含む）。"""
         n = self.gain.numel() + self.bias.numel()
         for d, k in enumerate(self.kinds):
-            if k == "sinc":
-                n += 4 * self.sA.shape[1] if self.sA.requires_grad else 0
+            if k in ("sinc", "sinc_e"):
+                n += (4 if k == "sinc" else 7) * self.sA.shape[1] if self.sA.requires_grad else 0
             elif self.A.requires_grad:
                 n += self.A.shape[1] + self.phi.shape[1]
         return n
