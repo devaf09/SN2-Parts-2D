@@ -95,3 +95,28 @@ def make(task: str, n: int, L: int = 64, seed: int = 0, noise: float = 0.1):
         raise ValueError(f"task は {list(TASKS)} のどれか")
     img = img + noise * torch.randn(n, L, L, generator=g)
     return img.clamp(0, 1), y
+
+
+def make_generic(n: int, L: int = 64, seed: int = 0, noise: float = 0.1):
+    """どの課題のクラスとも関係のない一般の絵 (n, L, L)。融合で「担当なし」として見せる（実験10）。
+    ぼやけた塊 1〜3 個と、ぼかした雑音を 0.5 で切った斑の模様を半分ずつ。線や課題の形は描かない。"""
+    g = torch.Generator().manual_seed(seed)
+    yy = torch.arange(L, dtype=torch.float32)[None, :, None]
+    xx = torch.arange(L, dtype=torch.float32)[None, None, :]
+    img = torch.zeros(n, L, L)
+    h = n // 2
+    for _ in range(3):   # 塊
+        on = (torch.rand(h, generator=g) < 0.7).float()[:, None, None]
+        cx = L / 2 + (torch.rand(h, generator=g) - 0.5) * 0.6 * L
+        cy = L / 2 + (torch.rand(h, generator=g) - 0.5) * 0.6 * L
+        sg = (2 + 6 * torch.rand(h, generator=g)) * L / 64
+        img[:h] += on * torch.exp(-((xx - cx[:, None, None]) ** 2 + (yy - cy[:, None, None]) ** 2) / (2 * sg[:, None, None] ** 2))
+    k = torch.exp(-(torch.arange(-6, 7, dtype=torch.float32) ** 2) / 8)
+    k = (k / k.sum())
+    z = torch.randn(n - h, 1, L, L, generator=g)
+    z = torch.nn.functional.conv2d(z, k[None, None, :, None], padding=(6, 0))
+    z = torch.nn.functional.conv2d(z, k[None, None, None, :], padding=(0, 6))[:, 0]
+    env = torch.exp(-((xx - L / 2) ** 2 + (yy - L / 2) ** 2) / (2 * (L / 6) ** 2))
+    img[h:] = (z > 0.5 * z.std()).float() * env[0]          # 斑の模様（中央付近）
+    img = img + noise * torch.randn(n, L, L, generator=g)
+    return img.clamp(0, 1)

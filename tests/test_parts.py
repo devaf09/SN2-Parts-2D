@@ -113,3 +113,11 @@ def test_illumination_cancels_cross_block_interference():
             avg = raw(u[:, None] * net.illum[None]).mean(1)
             sep = sum(raw(u * (m == k)) for k in range(b * b))
         assert torch.allclose(avg, sep, rtol=1e-3, atol=1e-4)
+
+
+def test_sinc_ripple_center_and_decay():
+    """④ 減衰する波紋: 中心で深さ A、外へ行くほど浅くなる。"""
+    y, x = p2.grid(33, 33)
+    ph = p2.plate_sinc(torch.tensor([2.0]), torch.tensor([0.8]), torch.tensor([16.0]), torch.tensor([16.0]), y, x)
+    assert abs(ph[16, 16].item() - 2.0) < 1e-4
+    assert ph[16, 32].abs() < 0.2 * ph[16, 16]

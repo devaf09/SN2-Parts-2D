@@ -32,6 +32,8 @@ PLATES = {
     "ripple": ["ripple"] * 16,
     "ripple2": ["ripple2"] * 16,
     "mix_xy_ripple": ["xy"] * 8 + ["ripple"] * 8,
+    "sinc": ["sinc"] * 16,         # ④ 減衰する波紋（持ち主の案、実験11）
+    "mix_xy_sinc": ["xy"] * 8 + ["sinc"] * 8,
     "random": ["stripes"] * 16,    # 板は学習しない
     "lens": [],                    # 板 0 枚
 }
@@ -51,6 +53,8 @@ def main():
     ap.add_argument("--patches", type=int, default=8)
     ap.add_argument("--z", type=float, default=64.0)
     ap.add_argument("--input", default="amp", choices=["amp", "phase"])
+    ap.add_argument("--n_ripples", type=int, default=None, help="④ の板 1 枚あたりの波紋の数（省略時は区画² / 2）")
+    ap.add_argument("--save", default=None, help="学習した光路を保存するファイル（results/models/ の下。リポジトリには入れない）")
     ap.add_argument("--illum", default=None, help="2 次元の照明。例 tilt:2（縦横 2 × 2 の区画、4 通り）、hadamard:4")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp01.txt")
@@ -63,7 +67,7 @@ def main():
     torch.manual_seed(a.seed)
     if a.method in PLATES:
         net = p2.Net2D(a.L, C, PLATES[a.method], patches=a.patches, z=a.z, seed=a.seed,
-                       freeze=(a.method == "random"),
+                       freeze=(a.method == "random"), n_ripples=a.n_ripples,
                        illum=None if a.illum is None else (int(a.illum.split(":")[1]), a.illum.split(":")[0])).to(dev)
         to_input = lambda v: p2.image_to_field(v, a.input)
         n_params = net.n_params()
@@ -87,6 +91,9 @@ def main():
         torch.cuda.synchronize()
     t_test = time.perf_counter() - t0
     acc_tr = p2.evaluate(net, Xtr[:2000], ytr[:2000], to_input=to_input)
+    if a.save:
+        os.makedirs(os.path.dirname(a.save) or ".", exist_ok=True)
+        torch.save({"state": net.state_dict(), "args": vars(a), "classes": C}, a.save)
     rec = dict(exp="01", **vars(a), lr_used=lr, classes=C, test_acc=acc, train_acc=acc_tr, params=n_params,
                train_s=t_train, infer_us_per_sample=1e6 * t_test / a.n_test,
                peak_MB=torch.cuda.max_memory_allocated() / 2**20 if dev.type == "cuda" else None,
