@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import torch  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-sys.path[:0] = [ROOT, os.path.join(ROOT, "experiments")]
+sys.path[:0] = [ROOT, os.path.join(ROOT, "experiments", "image")]
 import sn2_parts_2d as p2  # noqa: E402
 from exp27_locate import Fourier4f, make_scenes  # noqa: E402
 

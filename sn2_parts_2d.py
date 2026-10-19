@@ -22,6 +22,8 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.10.0 (2026-10-20) 画像認識の区切り。読み方の部品: code_scores・prototype_codes（符号で読む、実験22・23）、parts_scores（部品の窓、実験26）、
+                        Correlator4f（4f 系の光学相関器と光の非線形をはさんだ 2 段、どこに何があるかを出す、実験27〜30）。
     0.9.0 (2026-10-19)  train(schedule="cosine"): 学習率を最後に 0 まで下げる（実験17・21 で学習の谷が消える。推奨）。
     0.8.0 (2026-10-19)  Net2D(sinc_centers=...): ④⑤ の波紋の中心の初期配置（でたらめ・格子・格子 + ずらし）。
     0.7.0 (2026-10-18)  ⑤ 楕円で大きさを変えられる減衰する波紋 plate_sinc_ellipse（持ち主の案）と Net2D の "sinc_e"。
@@ -43,7 +45,7 @@ import math
 
 import torch
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 
 # =============================================================================================
@@ -544,3 +546,70 @@ def combine(base: torch.nn.Module, terms) -> torch.nn.Module:
         for name, p in out.named_parameters():
             p.copy_(bp[name] + sum(c * (dict(t.named_parameters())[name] - bp[name]) for c, t in terms))
     return out
+
+
+# =============================================================================================
+# 9. 読み方の部品: 符号で読む・部品の窓（窓の数に縛られない読み方、実験22〜26）
+# =============================================================================================
+
+def unit_rows(v: torch.Tensor) -> torch.Tensor:
+    """各行から平均を引いて長さ 1 にする（窓の明るさの模様・符号を比べるため）。"""
+    v = v - v.mean(-1, keepdim=True)
+    return v / (v.norm(dim=-1, keepdim=True) + 1e-9)
+
+
+def code_scores(windows: torch.Tensor, codes: torch.Tensor, temp: float = 10.0) -> torch.Tensor:
+    """窓の明るさ (N, K) と、クラスごとの符号 (C, K) の似ている度合い × 温度 = クラスの点数 (N, C)。
+    窓の数 K はクラス数 C と無関係に決めてよい（K = 16 で 1 クラス 1 窓と同等以上、実験22）。"""
+    return temp * unit_rows(windows) @ unit_rows(codes).T
+
+
+def prototype_codes(windows: torch.Tensor, labels: torch.Tensor, n_classes: int) -> torch.Tensor:
+    """クラスごとの窓の模様の平均（典型）を符号にする (C, K)。学習なしでクラスを足すときは、
+    全部のクラスの符号をこの作り方にそろえる（そろえないと新しいクラスが古いクラスを奪う、実験23）。"""
+    w = unit_rows(windows)
+    return torch.stack([w[labels == c].mean(0) for c in range(n_classes)])
+
+
+def parts_scores(part_logits: torch.Tensor, class_parts: torch.Tensor, prior: torch.Tensor | None = None) -> torch.Tensor:
+    """部品ごとの窓の点数 (N, P) から、クラスの点数 (N, C) を作る（1 次元の語根の 2 次元版、実験26）。
+    class_parts (C, P) は各クラスが持つ部品（0/1）。例を見せないクラスも、部品の組み合わせを書くだけで点数が出る。
+    prior (P,) は部品の出やすさ（訓練データでの対数オッズ）。差し引くと、見せないクラスが見せたクラスに吸い込まれるのを防ぐ。"""
+    s = part_logits if prior is None else part_logits - prior
+    F_ = torch.nn.functional
+    return F_.logsigmoid(s) @ class_parts.T + F_.logsigmoid(-s) @ (1 - class_parts).T
+
+
+# =============================================================================================
+# 10. どこに何があるか: 4f 系（光学相関器）と、光の非線形をはさんだ 2 段（実験27〜30）
+# =============================================================================================
+
+class Correlator4f(torch.nn.Module):
+    """4f 系: レンズ → 周波数の面の位相の板（全画素を学習）→ 逆のレンズ。探す物がある位置に光が集まる。
+    周波数の面の板は、絵のどこに物があっても同じ働きをする（位置をずらすと出力も同じだけずれる）。
+    nonlinear=True なら 2 段にして、間で「明るさを測り、その明るさで光を出し直す」（光の非線形）。
+    線形の段を何段重ねても 1 枚と同じだが、間に非線形を入れると見分けが強くなる（AUC 89/82 → 97/97%、実験28）。
+    出力は画素ごとの点数 (N, L, L)。sigmoid でその画素に探す物の中心がある確率になる。"""
+
+    def __init__(self, L: int, nonlinear: bool = True, seed: int = 0):
+        super().__init__()
+        g = torch.Generator().manual_seed(seed)
+        self.phase = torch.nn.Parameter(0.1 * torch.randn(2 if nonlinear else 1, L, L, generator=g))
+        self.nonlinear = nonlinear
+        self.gain = torch.nn.Parameter(torch.tensor(1.0))
+        self.bias = torch.nn.Parameter(torch.tensor(-4.0))
+
+    def _stage(self, u, s):
+        U = torch.fft.fft2(u, norm="ortho") * torch.polar(torch.ones_like(self.phase[s]), self.phase[s])
+        return intensity(normalize(torch.fft.ifft2(U, norm="ortho")))
+
+    def screen(self, u: torch.Tensor) -> torch.Tensor:
+        I = self._stage(u, 0)
+        if self.nonlinear:
+            I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
+            I = self._stage(torch.sqrt(I + 1e-12).to(torch.complex64), 1)
+        return I
+
+    def forward(self, u: torch.Tensor) -> torch.Tensor:
+        I = self.screen(u)
+        return self.gain * I / (I.mean((-2, -1), keepdim=True) + 1e-12) + self.bias

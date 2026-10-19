@@ -63,7 +63,7 @@ if len(sys.argv) == 1:
     print("docs/images/sinc_single.png, docs/images/plates_sinc.png")
 else:
     # 3. 学習した板（先頭 4 枚と、学習前の同じ板）。波紋の中心を点で重ねる
-    sys.path.insert(0, os.path.join(ROOT, "experiments"))
+    sys.path.insert(0, os.path.join(ROOT, "experiments", "image"))
     from exp01_basic import PLATES  # noqa: E402
     for path in sys.argv[1:]:
         ck = torch.load(path, map_location="cpu", weights_only=False)

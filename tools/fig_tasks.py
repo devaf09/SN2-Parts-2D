@@ -15,7 +15,7 @@ import torch  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "experiments"))
+sys.path.insert(0, os.path.join(ROOT, "experiments", "image"))
 import sn2_parts_2d as p2  # noqa: E402
 import tasks2d  # noqa: E402
 

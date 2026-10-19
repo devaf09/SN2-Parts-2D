@@ -2,7 +2,7 @@
 
 この資料は、SN2-Parts-2D の実験を、**番号順に、目的・方法・結果・得られたもの・問題点**の形で並べたものです。高校数学程度の知識で追えるように書いています。
 
-- 数字の元になった記録は [NOTES.md](../NOTES.md)、実験のプログラムは `experiments/`、条件は `experiments/sweeps/sweepNN.sh`（NN = 実験番号）にあります。
+- 数字の元になった記録は [NOTES.md](../NOTES.md)、画像認識の実験のプログラムは `experiments/image/`、条件は `experiments/image/sweeps/sweepNN.sh`（NN = 実験番号）にあります。
 - うまくいかなかった実験もすべて載せます。
 - 土台の 1 次元版の歩みは [Sin-CNN2 の説明資料](https://github.com/devaf09/Sin-CNN2/blob/main/docs/experiments_guide.md) にあります。
 

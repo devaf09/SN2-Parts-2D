@@ -2,179 +2,128 @@
 
 画像のような 2 次元の入力を光の場にして、**模様のある透明な板と回折だけ**で処理する部品（Python の関数）を作っています。重み行列（ニューロンのマップ）は持ちません。
 
-> **開発中です（版 0.7.0）。** 合成した図形の分類（M1）、別々に学んだ技能の融合（M2）、手書き数字 MNIST（M3 の始め）まで。
+> **版 0.10.0。画像認識の区切り（実験00〜30）。** 次は、2 次元で言語（LLM のようなもの）を目指します（`experiments/text/`）。
+
+![10 本の光路の融合で、どこに何の数字があるかを出す](docs/images/exp30_ten.png)
+
+*10 本の光路（数字ごと）を別々に学習し、色を分けて重ねるだけで、「どこに何の数字があるか」を 1 枚で出した例（実験30）。*
 
 ```mermaid
 flowchart LR
-    I["2 次元の入力<br/>（画像など）"] --> F["光の場<br/>Ly × Lx"]
-    F --> P1["Sin の板<br/>①②③"]
+    I["2 次元の入力<br/>（画像など）"] --> F["光の場<br/>64 × 64"]
+    F --> P1["模様の板<br/>①〜⑤"]
     P1 --> D1(("回折"))
-    D1 --> P2["Sin の板"]
-    P2 --> D2(("… × 16"))
-    D2 --> L["レンズ<br/>（2 次元フーリエ変換）"]
-    L --> W["スクリーンの窓<br/>一番明るい窓 = 答え"]
+    D1 --> P2["… × 16"]
+    P2 --> L["レンズ<br/>（2 次元フーリエ変換）"]
+    L --> W["スクリーン<br/>窓の明るさ = 答え"]
 ```
 
 ## これは何？
 
-[Sin-CNN2](https://github.com/devaf09/Sin-CNN2) では、文字列を 1 列の光にして、模様のある板を何枚も通し、スクリーンのどの窓が明るいかで答える学習器 **SinWave** を作りました。学習するのは板の模様だけです。別々に学んだ技能を「足すだけ」で合わせられ、外せば完全に元に戻る、という特徴があります。
+[Sin-CNN2](https://github.com/devaf09/Sin-CNN2) では、文字列を 1 列の光にして、模様のある板を何枚も通し、スクリーンのどの窓が明るいかで答える学習器 **SinWave** を作りました。学習するのは板の模様だけで、別々に学んだ技能を「足すだけ」で合わせられ、外せば完全に元に戻る、という特徴があります。
 
-このプロジェクトでは、それを **2 次元（縦 × 横の場）** に広げます。板の模様は 3 つの形を用意して比べます。
+このプロジェクトは、それを **2 次元（縦 × 横の場）** に広げる部品集です。作った部品は、音の研究 [SN2-Acoustics](https://github.com/devaf09/SN2-Acoustics)（スペクトログラムなどの 2 次元の入力）や、画像・木構造の研究（Project Metasequoia）で使います。
 
-| 板 | 模様 | ひとこと |
+## 画像認識でできたこと（実験00〜30）
+
+| できたこと | 数字（3 seed の平均） | 実験 |
 |---|---|---|
-| ① 交点で掛け算 | 横の波 + 縦の波 | 軽い。条件が合えば 2 次元の計算が横 1 列 + 縦 1 列に分かれる。代わりに横と縦が混ざらない |
-| ② 斜めの縞 | 向きのある縞 | 2 次元の計算が要る |
-| ③ 波紋 | 池の波紋・楕円の輪 | ② を含む広い形。光をどこに集めるかを学べる |
-| ④ 減衰する波紋（持ち主の案） | 中心が深く外ほど浅い波紋を重ねる | 波紋 1 つは深さ・幅・中心だけ。位置がずれても崩れにくい |
-| ⑤ 楕円の減衰する波紋（持ち主の案） | ④ に楕円と届く範囲を足す | |
+| 手書き数字 MNIST を、ロジスティック回帰より少ない数で上回る | **96.3%**（回帰 92.5%・学習する数 1/5、小さな CNN 98.1%） | 15・17・18 |
+| 服の絵 Fashion-MNIST | **85.9%**（回帰 84.4%、CNN 87.6%） | 18 |
+| 別々に学んだ技能を、明るさを足すだけで融合（相手のデータなし） | **4 技能で 100%**（同時に学習 99.4%）。「担当なし」の絵を見せるのが鍵 | 10・12 |
+| 外せば完全に元に戻る（取消） | 差 0 | 07 |
+| クラスを窓の明るさの模様（符号）で表す。窓の数に縛られない | 窓 16 個で 1 クラス 1 窓と同等以上（85.3 対 84.2%） | 22 |
+| 学習なしでクラスを足す（例の平均の模様を符号に） | 10 クラスで 76.3% | 23 |
+| 例を 1 枚も見せない服を、部品の組み合わせだけで当てる | コート・ブーツ・スニーカー 77〜82%（偶然 10%） | 26 |
+| どこに何があるかを出す（光学相関器 + 光の非線形） | 数字の位置ごとに 85%、2 数字の見分け AUC 97% | 27〜30 |
+| 学習の谷で終わらない（学習率を最後に 0 まで下げる） | どの条件でも最後が一番良い | 17・21 |
 
-作った部品は、音の研究 [SN2-Acoustics](https://github.com/devaf09/SN2-Acoustics)（スペクトログラムなどの 2 次元の入力）でも使う予定です。
+**できないこと・弱いこと（いまのところ）**
+- 小さな CNN には届かない（MNIST 1.8 点、Fashion 1.7 点）。学習の時間は CNN の約 20 倍。
+- 位置が少しずれても同じ形と答えること（合成の形の課題 70〜80%、CNN 98.6%）。
+- 学習し直さずに場の大きさを変えること（実験06）。
+- 親の光路から子の光路を作る「木」で、作り方（共通の初期の板・親から派生）による差は見えなかった（実験20・25）。
+- 1 本の光路への技能の足し算は 2 次元では壊れる（実験09）。融合は並列の光路で行う。
+- アナログで作ったとき、板が 1 画素ずれるとほぼ当てずっぽうになる（実験05。模様の精度は 16 段階で足りる）。
+
+目標への到達度は [docs/scoreboard.md](docs/scoreboard.md)。実験の歩みは高校生向けの説明 [docs/experiments_guide.md](docs/experiments_guide.md)、数字の正本は [NOTES.md](NOTES.md)。
 
 ## いちばん簡単な使い方
 
 必要なもの: Python 3.10 以上、PyTorch 2.0 以上。`sn2_parts_2d.py` を 1 つコピーすれば使えます。
 
 ```python
-import torch
 import sn2_parts_2d as p2
 
-Ly = Lx = 64
-y, x = p2.grid(Ly, Lx)
-pid = p2.patch_index(Ly, Lx, 4, 4)                     # 4 × 4 の区画
-A, phi = torch.rand(16), 6.28 * torch.rand(16)         # 区画ごとの振幅と初期位相（学習する数）
-wx, wy = torch.rand(16), torch.rand(16)                # 縞の細かさと向き（固定）
-H = p2.transfer(Ly, Lx, z=64.0)                        # 板の間隔 64 画素の回折
+# 64 × 64 の画像 X（0〜1）とラベル y で、板 ① を 16 枚の光路を学習する
+net = p2.Net2D(64, n_classes=10, plates=["xy"] * 16)
+to_field = lambda v: p2.image_to_field(v, "amp")
+p2.train(net, X, y, to_input=to_field, schedule="cosine")        # 学習率を最後に 0 まで下げる（推奨）
+print(p2.evaluate(net, X_test, y_test, to_input=to_field))       # 正解率（%）
 
-u = torch.ones(1, Ly, Lx, dtype=torch.complex64)       # 入力の光の場
-u = p2.normalize(p2.propagate(p2.apply_plate(u, p2.plate_stripes(A, wx, wy, phi, pid, y, x)), H))
-I = p2.intensity(p2.lens(u))                           # レンズの後のスクリーンの明るさ (1, 64, 64)
+# 融合: 技能ごとに「担当なし」の絵も見せて学習し、明るさを足すだけ
+G = p2.generic_images(4000, 64)
+a = p2.train(p2.Net2D(64, 10, ["xy"] * 16, seed=1), Xa, ya, to_input=to_field, reject=G, reject_weight=0.3)
+b = p2.train(p2.Net2D(64, 10, ["xy"] * 16, seed=2), Xb, yb, to_input=to_field, reject=G, reject_weight=0.3)
+both = p2.merge([a, b])                                          # 外せば元どおり: p2.merge([a])
 ```
 
-## 部品の一覧
+## 部品の一覧（sn2_parts_2d.py）
 
-| 関数 | 何をするか | 確かめたところ |
-|---|---|---|
-| `image_to_field` | 画像を光の場にする（振幅として・位相として） | 実験01・02（振幅が良い） |
-| `Net2D`, `train`, `evaluate` | 1 本の光路（板の形を 1 枚ごとに選べる）、学習、正解率 | 実験01〜 |
-| `plate_xy`, `plate_xy_parts` | ① 交点で掛け算の板 | 実験01（いちばん良い）・MNIST 94.4% |
-| `plate_stripes` | ② 斜めの縞の板 | 実験01 |
-| `plate_ripple`, `ripple_radius` | ③ 波紋の板（等間隔の輪・ゾーンプレート、楕円） | 実験01・03 |
-| `plate_sinc` | ④ 減衰する波紋の板（深さ・幅・中心） | 実験11・13 |
-| `plate_sinc_ellipse` | ⑤ 楕円で大きさを変えられる減衰する波紋 | 実験14 |
-| `illumination`, `Net2D(illum=...)` | 2 次元の照明（区画どうしの干渉を消す） | 実験04（形 71 → 80%） |
-| `merge`, `derive`, `combine` | 融合（光路を並べて足す）・取消・足し算 | 実験07・09 |
-| `generic_images`, `train(reject=...)` | 「担当なし」の絵を見せる学習（融合の取り違えを防ぐ） | 実験10・12（融合 100%） |
-| `grid`, `patch_index`, `band_index` | 場の座標、区画・帯の番号 | テスト |
-| `transfer`, `transfer_sep`, `propagate` | 2 次元の回折（角スペクトル法・近軸） | テスト |
-| `normalize`, `lens`, `intensity` | 明るさを平均 1 に、レンズ、明るさ | テスト |
-| `propagate_sep`, `normalize_sep`, `lens_sep`, `outer` | ① の軽い計算（横 1 列 + 縦 1 列） | テスト・実験00 |
-| `window_grid`, `read_windows` | スクリーンの窓を並べ、明るさを読む | テスト |
+| 区分 | 関数 | 何をするか | 確かめた実験 |
+|---|---|---|---|
+| 入力 | `image_to_field` | 画像を光の場にする（振幅として・位相として） | 01・02（振幅が良い） |
+| 板 | `plate_xy` | ① 交点で掛け算（横の波 + 縦の波） | 01・15（板の中で一番良い） |
+| 板 | `plate_stripes` | ② 斜めの縞 | 01 |
+| 板 | `plate_ripple` | ③ 波紋（等間隔の輪・ゾーンプレート、楕円） | 01・03 |
+| 板 | `plate_sinc` | ④ 減衰する波紋（持ち主の案。深さ・幅・中心だけで決まる） | 11・13・17・18（MNIST 96.3%） |
+| 板 | `plate_sinc_ellipse` | ⑤ 楕円で大きさを変えられる減衰する波紋（持ち主の案） | 14 |
+| 伝搬 | `transfer`, `propagate`, `lens`, `normalize` | 2 次元の回折（角スペクトル法・近軸）、レンズ、明るさの正規化 | テスト |
+| 伝搬 | `propagate_sep` など | ① の軽い計算（横 1 列 + 縦 1 列） | 00 |
+| 照明 | `illumination`, `Net2D(illum=...)` | 2 次元の照明（区画どうしの干渉を消す） | 04（形 71 → 80%） |
+| 光路 | `Net2D`, `train`, `evaluate` | 1 本の光路、学習（cosine・担当なし）、正解率 | 01〜 |
+| 融合 | `merge`, `generic_images`, `train(reject=...)` | 並列の光路の融合・取消、担当なしの学習 | 07・10・12 |
+| 融合 | `derive`, `combine` | 共通の出発点からの足し算（2 次元では壊れる） | 09 |
+| 読み方 | `window_grid`, `read_windows` | スクリーンの窓（1 クラス 1 窓） | 01〜 |
+| 読み方 | `code_scores`, `prototype_codes` | 符号で読む（窓の数に縛られない）、典型の模様でクラスを足す | 22・23 |
+| 読み方 | `parts_scores` | 部品の窓から、例のないクラスを部品の組み合わせで当てる | 26 |
+| 位置 | `Correlator4f` | 光学相関器（4f 系）、光の非線形をはさんだ 2 段。どこに何があるか | 27〜30 |
 
 板の模様（学習前）:
 
 ![板の模様](docs/images/plates.png)
-
-学習器を作って学習する例（64 × 64 の画像 `X`（0〜1）とラベル `y`）:
-
-```python
-net = p2.Net2D(64, n_classes=8, plates=["xy"] * 16)          # 板 ① を 16 枚
-to_field = lambda v: p2.image_to_field(v, "amp")
-p2.train(net, X, y, to_input=to_field)
-print(p2.evaluate(net, X_test, y_test, to_input=to_field))  # 正解率（%）
-```
-
-これから作る部品と順番は [docs/design_m1.md](docs/design_m1.md) にあります。
-
-## ここまでの結果
-
-**本物の画像**（テスト正解率 %、3 seed の平均、実験15・17・18）
-
-| 方式 | 学習する数 | 手書き数字 MNIST | 服の絵 Fashion-MNIST |
-|---|---|---|---|
-| ロジスティック回帰 | 40970 | 92.5 | 84.4 |
-| 小さな CNN | 2882 | **97.8** | **86.1** |
-| SinWave 板 ①（学習率一定） | 2059 | 94.4 | 84.4 |
-| SinWave 板 ①（学習率を最後に 0 まで下げる） | 2059 | 95.3 | 85.3 |
-| SinWave ④ 波紋 128 個（同） | 8203 | 95.7 | 84.8 |
-| **SinWave ④ 波紋 128 個（同 + 中心・幅の学習率を別に）** | 8203 | **96.3** | **85.9** |
-
-**別々に学んだ技能を、明るさを足すだけで融合**（向き × 位置の合成課題、実験07・10・12）
-
-| 方式 | 2 技能 | 4 技能 |
-|---|---|---|
-| 足すだけ | 80.8 | 35.1 |
-| **「担当なし」の絵も見せて学習 → 足すだけ** | **100.0** | **100.0** |
-| 全部を 1 本で同時に学習 | 99.4 | 99.4 |
-
-相手の技能のデータは一切使いません。融合から外せば、残りは元と完全に同じ答えに戻ります（取消）。
-
-**4 つの合成課題**（64 × 64、テスト正解率 %、3 seed の平均、実験01・04・13）
-
-![合成課題の例](docs/images/tasks.png)
-
-| 方式 | 学習する数 | 形 | 縞の向き | 位置（3×3 のマス） | 線の向き × 左右 |
-|---|---|---|---|---|---|
-| 偶然 | – | 12.5 | 12.5 | 11.1 | 12.5 |
-| ロジスティック回帰（画素） | 32776 | 37.2 | 13.8 | 100 | 64.9 |
-| 小さな CNN | 2784 | **98.6** | 100 | 99.0 | 100 |
-| SinWave 板 ① | 2057 | 70.6 | 99.9 | **99.8** | 99.4 |
-| SinWave 板 ① + 2 次元の照明 16 通り | 2057 | 79.9 | | | 99.8 |
-| SinWave ④ 波紋 128 個・浅め | 8201 | 76.3 | | | |
-
-**できないこと（いまのところ）**
-- 位置が少しずれても同じ形と答えること（形の課題 70〜80%、CNN は 98.6%）
-- 小さな CNN に並ぶこと（MNIST で 3.4 点届かない）。計算も重く、学習は CNN の約 16 倍の時間
-- 学習し直さずに場の大きさを変えること（実験06）
-- アナログで作ったとき、板が 1 画素ずれるとほぼ当てずっぽうになる（実験05。模様の精度は 16 段階で足りる）
-
-**計算量**（実験00、RTX 3060、板 16 枚・学習 1 ステップの 1 件あたり）
-
-| 場の大きさ | 2 次元の場（②③） | ① 横と縦に分けた計算 | メモリ（256 件、2 次元の場） |
-|---|---|---|---|
-| 64 × 64 | 0.15 ms | 0.11 ms | 0.4 GB |
-| 128 × 128 | 0.50 ms | 0.11 ms | 1.5 GB |
-| 256 × 256 | 1.96 ms | 0.14 ms | 6.1 GB |
-| 参考: 1 次元の SinWave（1024 画素） | 0.06 ms | | 0.1 GB |
-
-① の軽い計算は、入力が「横の模様 × 縦の模様」の形のときだけ使えます（画像は一般にこの形ではありません）。
-
-目標への到達度は [docs/scoreboard.md](docs/scoreboard.md)（今 67.3 / 100 点）。
+![④ 減衰する波紋](docs/images/sinc_single.png)
 
 ## しくみ
 
 光（波）は、模様のある板を通ると、模様に合わせて少しずつ向きを変えます。板を何枚も通し、板と板の間で光を広がらせる（回折）と、入力ごとに違う場所に光が集まるようになります。最後にレンズで「同じ向きに進む光」を 1 点に集め、どの窓が一番明るいかで答えます。学習するのは板の模様だけです。
 
-くわしくは、実験の歩み [docs/experiments_guide.md](docs/experiments_guide.md)、研究ノート [NOTES.md](NOTES.md)、1 次元版の解説 [Sin-CNN2 の introduction.md](https://github.com/devaf09/Sin-CNN2/blob/main/docs/introduction.md) を見てください。
+「どこにあるか」を出すときは、レンズ → 周波数の面の板 → もう一度レンズ（光学相関器）にします。探す物がある位置に光が集まります。
+
+くわしくは [docs/experiments_guide.md](docs/experiments_guide.md)（実験の歩み）、1 次元版の解説 [Sin-CNN2 の introduction.md](https://github.com/devaf09/Sin-CNN2/blob/main/docs/introduction.md)。
 
 ## フォルダの構成
 
 | 場所 | 中身 |
 |---|---|
 | `sn2_parts_2d.py` | 部品（1 ファイル、PyTorch のみ）。先頭に変更履歴と `__version__` |
-| `tests/` | 部品の確認 |
-| `experiments/expNN_名前.py` | 実験のプログラム（NN = 実験番号）。条件は `experiments/sweeps/sweepNN.sh` |
-| `results/expNN.txt` | 結果（1 回の実行 = 1 行の JSON） |
-| `experiments/tasks2d.py`, `baselines2d.py` | 合成課題、比較相手（回帰・MLP・小さな CNN） |
-| `tools/` | 集計（`summarize.py`）、ポイント表（`scoreboard.py`）、図（`fig_tasks.py`） |
-| `docs/` | 説明資料、ポイント表、設計の案 |
+| `tests/` | 部品の確認（`python -m pytest tests -q`、CPU で数秒） |
+| `experiments/image/` | 画像認識の実験（実験00〜30）。`expNN_名前.py`、合成課題 `tasks2d.py`、比較相手 `baselines2d.py`、条件 `sweeps/sweepNN.sh` |
+| `experiments/text/` | 言語の実験（これから） |
+| `results/expNN.txt` | 結果（1 回の実行 = 1 行の JSON）。実験番号は画像・言語で通し |
+| `tools/` | 集計（`summarize.py`）、ポイント表（`scoreboard.py`）、図（`fig_*.py`）、データの取得（`fetch_mnist.py`） |
+| `docs/` | 説明資料（`experiments_guide.md`）、ポイント表、設計のメモ、図（`images/`） |
 | `vendor/` | Sin-CNN2 から写した 1 次元の SinWave（MIT、出典は [vendor/README.md](vendor/README.md)） |
 | `NOTES.md` | 実験ノート（数字の正本） |
 
-テストの実行（CPU で数秒）:
+実験はリポジトリ直下で実行します。例:
 
 ```bash
-python -m pytest tests -q
-```
-
-実験のやり直し（GPU。実験01 は RTX 3060 で約 2 時間）と集計:
-
-```bash
-bash experiments/sweeps/sweep01.sh
+python experiments/image/exp15_mnist.py --data mnist --method xy --seed 0 --device cuda
 ```
 
 ```bash
-python tools/summarize.py results/exp01.txt --rows method --cols task
+python tools/summarize.py results/exp15.txt --rows method --cols data
 ```
 
 ## ライセンスとデータの出典

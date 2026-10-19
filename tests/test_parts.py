@@ -124,3 +124,31 @@ def test_sinc_ripple_center_and_decay():
     ph = p2.plate_sinc(torch.tensor([2.0]), torch.tensor([0.8]), torch.tensor([16.0]), torch.tensor([16.0]), y, x)
     assert abs(ph[16, 16].item() - 2.0) < 1e-4
     assert ph[16, 32].abs() < 0.2 * ph[16, 16]
+
+
+def test_code_scores_and_prototypes():
+    """符号で読む: 典型の模様を符号にすると、その模様の絵は自分のクラスが一番高い。"""
+    torch.manual_seed(0)
+    w = torch.randn(40, 16)
+    y = torch.arange(40) % 4
+    w[torch.arange(40), y * 3] += 5.0                # クラスごとに目立つ窓を作る
+    C = p2.prototype_codes(w, y, 4)
+    assert (p2.code_scores(w, C).argmax(1) == y).float().mean() > 0.9
+
+
+def test_parts_scores_unseen_class():
+    """部品の窓: 部品の点数が「部品 0 と 2 がある」なら、その組み合わせのクラスが一番高い（例を見せていないクラスでも）。"""
+    M = torch.tensor([[1, 0, 0], [0, 1, 0], [1, 0, 1.0]])   # クラス 2 = 部品 0 + 部品 2
+    s = torch.tensor([[4.0, -4.0, 4.0]])
+    assert int(p2.parts_scores(s, M).argmax(1)) == 2
+
+
+def test_correlator_shift_equivariant():
+    """4f 系（1 段）は、入力をずらすと出力も同じだけずれる（どこにあっても同じ働き）。"""
+    m = p2.Correlator4f(32, nonlinear=False, seed=1)
+    u = torch.zeros(1, 32, 32, dtype=torch.complex64)
+    u[0, 10:14, 8:12] = 1
+    with torch.no_grad():
+        a = m(u)
+        b = m(torch.roll(u, (5, 7), (-2, -1)))
+    assert torch.allclose(torch.roll(a, (5, 7), (-2, -1)), b, atol=1e-4)
