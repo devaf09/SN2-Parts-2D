@@ -102,6 +102,22 @@ class Fourier4f(torch.nn.Module):
         return self.gain * I / (I.mean((-2, -1), keepdim=True) + 1e-12) + self.bias
 
 
+class Fourier4fNL(torch.nn.Module):
+    """4f 系を 2 段、間に「明るさを測って、その明るさで光を出し直す」段（カメラと表示器のつなぎ = 光の非線形）を入れる（実験28）。
+    1 段目は数字の形の部品に光を集め、2 段目がその組み合わせを見る。線形の 4f 系を何段重ねても 1 枚の板と同じなので、間に非線形が要る。"""
+
+    def __init__(self, seed=0):
+        super().__init__()
+        self.s1 = Fourier4f(1, seed)
+        self.s2 = Fourier4f(1, seed + 1)
+        self.gain, self.bias = self.s2.gain, self.s2.bias
+
+    def forward(self, u):
+        I1 = self.s1.screen(u)
+        I1 = I1 / (I1.mean((-2, -1), keepdim=True) + 1e-12)
+        return self.s2(torch.sqrt(I1 + 1e-12).to(torch.complex64))
+
+
 class PlatesNoLens(torch.nn.Module):
     """板 ① 16 枚を回折しながら通し、最後のレンズを使わずに出力の面（位置）で読む。"""
 
@@ -145,12 +161,20 @@ def evaluate(model, X, objs, digit, batch=500):
             if d != digit:
                 nfp += 1
                 fp += int(P[i, max(cy - 4, 0):cy + 5, max(cx - 4, 0):cx + 5].max() > 0.5)
-    return dict(presence=pres_acc, located=100.0 * hit / max(tot, 1), false_alarm=100.0 * fp / max(nfp, 1)), P
+    # 目標の数字の位置と、ほかの数字の位置での確率の最大を比べる（目標の方が高い組の割合 = AUC。閾値によらない見分けの強さ）
+    pos, neg = [], []
+    for i, o in enumerate(objs):
+        for cy, cx, d in o:
+            v = float(P[i, max(cy - 4, 0):cy + 5, max(cx - 4, 0):cx + 5].max())
+            (pos if d == digit else neg).append(v)
+    pt, nt = torch.tensor(pos), torch.tensor(neg)
+    auc = float(((pt[:, None] > nt[None]).float() + 0.5 * (pt[:, None] == nt[None]).float()).mean()) if len(pos) and len(neg) else float("nan")
+    return dict(presence=pres_acc, located=100.0 * hit / max(tot, 1), false_alarm=100.0 * fp / max(nfp, 1), auc=100.0 * auc), P
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", default="fourier", choices=["fourier", "fourier4", "plates"])
+    ap.add_argument("--method", default="fourier", choices=["fourier", "fourier4", "fourier2nl", "plates"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--n_train", type=int, default=20000)
@@ -166,6 +190,7 @@ def main():
     for digit in (3, 7):
         T = target_maps(otr, digit)
         m = {"fourier": lambda: Fourier4f(1, a.seed + digit), "fourier4": lambda: Fourier4f(4, a.seed + digit),
+             "fourier2nl": lambda: Fourier4fNL(a.seed + digit),
              "plates": lambda: PlatesNoLens(a.seed + digit)}[a.method]().to(dev)
         opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=0.01)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
