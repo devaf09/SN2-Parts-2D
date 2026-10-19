@@ -83,6 +83,22 @@ class CorrNet(torch.nn.Module):
         return self.gain * p2.read_windows(I, self.det) + self.bias
 
 
+class Recency(torch.nn.Module):
+    """位置ごとの明るさを学習する（実験33）。帯 m の光に e^{w_m} を掛け、全体の明るさをそろえる。
+    1 次元の実験52 では、直前の文字ほど明るくすると良くなった。初期値は直前ほど明るい e^{(m−n+1)·0.3}。"""
+
+    def __init__(self, inner, n):
+        super().__init__()
+        self.inner, self.n = inner, n
+        self.w = torch.nn.Parameter(0.3 * (torch.arange(n, dtype=torch.float32) - n + 1))
+        self.register_buffer("band", (torch.arange(L) * n // L).long())
+
+    def forward(self, u):
+        amp = torch.exp(self.w)[self.band]
+        amp = amp / amp.pow(2).mean().sqrt()
+        return self.inner(u * amp[None, :, None])
+
+
 class GRU(torch.nn.Module):
     def __init__(self, V, C, hid=128):
         super().__init__()
@@ -112,10 +128,11 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--max_train", type=int, default=60000)
+    ap.add_argument("--recency", action="store_true", help="位置ごとの明るさを学習する（実験33）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
-    out = a.out or ("results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
+    out = a.out or ("results/exp33.txt" if a.recency else "results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, a.max_train, 10000, a.seed)
     V, C = info["V_in"], info["C"]
@@ -138,6 +155,8 @@ def main():
             m, f = GRU(V, C), (lambda v: v)
         else:
             m, f = LogReg(V, C, a.n), (lambda v: v)
+        if a.recency:
+            m = Recency(m, a.n)
         m = m.to(dev)
         n_params = sum(p.numel() for p in m.parameters() if p.requires_grad)
         lr = 0.003 if a.method == "logreg" else 0.01
@@ -171,7 +190,7 @@ def main():
             S = torch.cat([m(f(Xt[j:j + 500]).to(dev)).cpu() for j in range(0, len(yt), 500)])
         acc = 100.0 * (S.argmax(1) == yt).float().mean().item()
         ce = F.cross_entropy(S, yt).item()
-        rec = dict(exp="32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
+        rec = dict(exp="33" if a.recency else "32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
                    train_s=t_train, history=history, version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
