@@ -106,6 +106,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--parts", nargs="+", default=["A", "B", "C", "D"])
+    ap.add_argument("--holdout", type=int, default=4, help="C で例を見せないクラス（部品だけで定義する。実験24）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp22.txt")
     a = ap.parse_args()
@@ -135,16 +136,30 @@ def main():
             res[f"B_add{n}_all10"] = acc(s, yte)
             tn = torch.isin(yte, torch.tensor(new))
             res[f"B_add{n}_new"] = acc(s[tn], yte[tn])
+        # 古いクラスの符号も、同じく例の平均の模様に置き換える（全部のクラスを同じ作り方にそろえる。実験23）
+        for n in (20, 100):
+            g = torch.Generator().manual_seed(a.seed + 7)
+            with torch.no_grad():
+                for c in range(10):
+                    idx = (ytr == c).nonzero()[:, 0]
+                    idx = idx[torch.randperm(len(idx), generator=g)[:n]]
+                    m.codes[c] = windows(m, Xtr[idx]).mean(0).to(dev)
+            s = scores(m, Xte)
+            res[f"B_allproto{n}_all10"] = acc(s, yte)
+            tn = torch.isin(yte, torch.tensor(new))
+            res[f"B_allproto{n}_new"] = acc(s[tn], yte[tn])
     if "C" in a.parts:   # 部品の符号の和（コートは見せない）
         pc = rand_codes(len(PARTS), 32, a.seed + 1)
         codes = torch.stack([pc[CLASS_PARTS[c]].sum(0) for c in range(10)])
-        seen = [c for c in range(10) if c != 4]
+        ho = a.holdout
+        seen = [c for c in range(10) if c != ho]
         mtr = torch.isin(ytr, torch.tensor(seen))
         m = train(CodeNet(codes, 32, a.seed).to(dev), Xtr[mtr], ytr[mtr], a.steps, a.seed)
         s = scores(m, Xte)
         res["C_all10"] = acc(s, yte)
-        res["C_coat_zero_shot"] = acc(s[yte == 4], yte[yte == 4])
-        res["C_seen9"] = acc(s[yte != 4][:, seen], torch.tensor([seen.index(v) for v in yte[yte != 4].tolist()]))
+        res["C_coat_zero_shot"] = acc(s[yte == ho], yte[yte == ho])     # 名前は実験22 のまま（例を見せないクラスの正解率）
+        res["C_seen9"] = acc(s[yte != ho][:, seen], torch.tensor([seen.index(v) for v in yte[yte != ho].tolist()]))
+        res["C_unseen_pred"] = torch.bincount(s[yte == ho].argmax(1), minlength=10).tolist()   # 例を見せないクラスを何と答えたか
     if "D" in a.parts:   # 同じ 32 個の窓を共有して融合
         codes = rand_codes(10, 32, a.seed)
         sk = []
