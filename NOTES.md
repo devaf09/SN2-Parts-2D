@@ -2,7 +2,7 @@
 
 SinWave（正弦の干渉と回折だけで学ぶ学習器、[Sin-CNN2](https://github.com/devaf09/Sin-CNN2)）を 2 次元の場（Ly × Lx）へ広げる部品を作り、実験で確かめながら改良していく記録。数字の正本。
 
-> ファイル配置（2026-10-20 整理）: 部品は `sn2_parts_2d.py`。画像認識の実験（00〜30）は `experiments/image/expNN_名前.py`、条件は `experiments/image/sweeps/sweepNN.sh`。言語の実験（31〜）は `experiments/text/`。本文中のスクリプト名はファイル名のみ。、結果は `results/expNN.txt`（1 回 = 1 行の JSON）、図は `tools/` のプログラムから `docs/images/` に。リポジトリ直下で実行する。
+> ファイル配置（2026-10-20 整理）: 部品は `sn2_parts_2d.py`。画像認識の実験（00〜30）は `experiments/image/expNN_名前.py`、条件は `experiments/image/sweeps/sweepNN.sh`。言語の実験（31〜）は `experiments/text/`。結果は `results/expNN.txt`（1 回 = 1 行の JSON）、図は `tools/` のプログラムから `docs/images/` に。リポジトリ直下で実行する。本文中のスクリプト名はファイル名のみ。
 
 ## 現時点のまとめ（2026-10-20 更新、画像認識の区切り）
 
