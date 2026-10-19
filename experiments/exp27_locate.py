@@ -37,8 +37,8 @@ from exp15_mnist import ROOT  # noqa: E402
 L, S = 64, 20          # 場の大きさ、数字の大きさ
 
 
-def make_scenes(n, seed, train=True):
-    """絵 (n, L, L)、数字の中心と種類のリスト。"""
+def make_scenes(n, seed, train=True, uniform=False):
+    """絵 (n, L, L)、数字の中心と種類のリスト。uniform=True なら 0〜9 を同じ割合で置く（実験30）。"""
     from torchvision import datasets
     d = datasets.MNIST(ROOT, train=train, download=False)
     dig = F.interpolate(d.data[:, None].float() / 255.0, size=(S, S), mode="bilinear", align_corners=False)[:, 0]
@@ -59,8 +59,10 @@ def make_scenes(n, seed, train=True):
             if tries > 50:              # 1 個目が真ん中だと 2 個目を置けないので、置き直す
                 cs, tries = [], 0
         for cy, cx in cs:
-            r = int(torch.randint(3, (1,), generator=g))
-            pool = [idx3, idx7, idxo][r]
+            if uniform:
+                pool = (lab == int(torch.randint(10, (1,), generator=g))).nonzero()[:, 0]
+            else:
+                pool = [idx3, idx7, idxo][int(torch.randint(3, (1,), generator=g))]
             j = pool[int(torch.randint(len(pool), (1,), generator=g))]
             X[i, cy - S // 2:cy + S // 2, cx - S // 2:cx + S // 2] = torch.maximum(X[i, cy - S // 2:cy + S // 2, cx - S // 2:cx + S // 2], dig[j])
             o.append((cy, cx, int(lab[j])))
