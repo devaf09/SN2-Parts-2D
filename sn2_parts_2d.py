@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.11.0 (2026-10-20) train(log_every=..., log_fn=...): 学習の経過を net.history に記録する（持ち主の依頼。図は tools/fig_history.py）。
     0.10.0 (2026-10-20) 画像認識の区切り。読み方の部品: code_scores・prototype_codes（符号で読む、実験22・23）、parts_scores（部品の窓、実験26）、
                         Correlator4f（4f 系の光学相関器と光の非線形をはさんだ 2 段、どこに何があるかを出す、実験27〜30）。
     0.9.0 (2026-10-19)  train(schedule="cosine"): 学習率を最後に 0 まで下げる（実験17・21 で学習の谷が消える。推奨）。
@@ -45,7 +46,7 @@ import math
 
 import torch
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 
 # =============================================================================================
@@ -463,17 +464,22 @@ def generic_images(n: int, L: int = 64, seed: int = 0, noise: float = 0.1) -> to
 
 def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1500, lr: float = 0.01,
           batch_size: int = 256, seed: int = 0, to_input=None, reject: torch.Tensor | None = None,
-          reject_weight: float = 1.0, schedule: str = "const") -> torch.nn.Module:
+          reject_weight: float = 1.0, schedule: str = "const", log_every: int = 0, log_fn=None) -> torch.nn.Module:
     """クロスエントロピーで学習する（Adam）。X の一部を to_input で変換してから net に渡す（例: image_to_field）。
     reject に「担当なし」の絵（generic_images）を渡すと、それを見たときはどの窓も同じ明るさになる（答えを出さない）ようにも学ぶ。
     融合する技能はこれで学習しておくと、相手のデータなしで足すだけの融合が成り立つ（実験10: 80.8 → 100%）。
-    schedule="cosine" で学習率を最後に 0 まで下げる（学習の谷で終わらない。実験17・21。推奨）。"""
+    schedule="cosine" で学習率を最後に 0 まで下げる（学習の谷で終わらない。実験17・21。推奨）。
+    log_every > 0 なら、そのステップごとに学習の経過を net.history（辞書の並び）に記録する:
+      ステップ・学習の時間（秒、記録の時間は除く）・その回の損失・学習率、と log_fn(net) が返す辞書（例: テストの正解率）。
+      図は tools/fig_history.py で描ける。"""
     dev = _device(net)
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, steps) if schedule == "cosine" else None
     g = torch.Generator().manual_seed(seed)
     to_input = to_input or (lambda v: v)
-    for _ in range(steps):
+    import time as _time
+    net.history, t_train, t0 = [], 0.0, _time.perf_counter()
+    for step in range(1, steps + 1):
         idx = torch.randint(len(X), (batch_size,), generator=g)
         loss = torch.nn.functional.cross_entropy(net(to_input(X[idx].to(dev))), y[idx].to(dev))
         if reject is not None:
@@ -484,6 +490,14 @@ def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1
         opt.step()
         if sched is not None:
             sched.step()
+        if log_every and (step % log_every == 0 or step == steps):
+            t_train += _time.perf_counter() - t0
+            rec = dict(step=step, train_s=round(t_train, 2), loss=float(loss.detach()), lr=opt.param_groups[0]["lr"])
+            if log_fn is not None:
+                with torch.no_grad():
+                    rec.update(log_fn(net))
+            net.history.append(rec)
+            t0 = _time.perf_counter()
     return net
 
 

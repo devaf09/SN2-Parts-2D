@@ -1,0 +1,1 @@
+{"exp": "32", "method": "corr1", "n": 8, "seed": 0, "steps": 3000, "max_train": 60000, "device": "cuda", "out": null, "test_acc": 36.26999855041504, "test_ce": 3.123811960220337, "params": 4161, "train_s": 22.085097200004384, "version": "0.11.0", "torch": "2.14.1+cu126"}

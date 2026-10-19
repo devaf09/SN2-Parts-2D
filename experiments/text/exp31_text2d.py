@@ -58,7 +58,10 @@ def encode(X, n, V):
 
 
 class CorrNet(torch.nn.Module):
-    """4f 系を stages 段（段の間で明るさを測って光を出し直す = 光の非線形）→ レンズ → 窓 C 個。"""
+    """4f 系を stages 段（段の間で明るさを測って光を出し直す = 光の非線形）→ 出力の面の窓 C 個。
+    注意（2026-10-20 に修正）: 最初の版は最後にレンズを通してから窓で読んでいた。周波数の面の位相の板のすぐ後のレンズの明るさは
+    板の位相に関係しない（|U·e^{jφ}|² = |U|²）ので、最後の段の板は働かず、1 段なら「入力をレンズで見ただけ」と同じになっていた。
+    いまの版はレンズを通さず、出力の面（場所）で読む。"""
 
     def __init__(self, stages, C, seed=0):
         super().__init__()
@@ -75,7 +78,7 @@ class CorrNet(torch.nn.Module):
                 u = torch.sqrt(I / (I.mean((-2, -1), keepdim=True) + 1e-12) + 1e-12).to(torch.complex64)
             U = torch.fft.fft2(u, norm="ortho") * torch.polar(torch.ones_like(self.phase[s]), self.phase[s])
             u = p2.normalize(torch.fft.ifft2(U, norm="ortho"))
-        I = p2.intensity(p2.lens(u))
+        I = p2.intensity(u)
         I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
         return self.gain * p2.read_windows(I, self.det) + self.bias
 
@@ -141,22 +144,35 @@ def main():
         opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=lr)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
         g = torch.Generator().manual_seed(a.seed)
-        for _ in range(a.steps):
+        history, t_train, t_mark = [], 0.0, time.perf_counter()
+
+        def peek():   # 学習の経過（持ち主の依頼）: テスト・訓練の先頭 2000 件の正解率と確信度
+            r = {}
+            with torch.no_grad():
+                for name, XX, yy in (("test", Xt[:2000], yt[:2000]), ("train", X[:2000], y[:2000])):
+                    S = torch.cat([m(f(XX[j:j + 500]).to(dev)).cpu() for j in range(0, len(yy), 500)])
+                    r[f"{name}_acc"] = 100.0 * (S.argmax(1) == yy).float().mean().item()
+                    r[f"{name}_ce"] = F.cross_entropy(S, yy).item()
+            return r
+        for step in range(1, a.steps + 1):
             i = torch.randint(len(y), (256,), generator=g)
             loss = F.cross_entropy(m(f(X[i]).to(dev) if a.method in ("gru", "logreg") else f(X[i]).to(dev)), y[i].to(dev))
             opt.zero_grad()
             loss.backward()
             opt.step()
             sch.step()
-        if dev.type == "cuda":
-            torch.cuda.synchronize()
-        t_train = time.perf_counter() - t0
+            if step % 250 == 0 or step == a.steps:
+                if dev.type == "cuda":
+                    torch.cuda.synchronize()
+                t_train += time.perf_counter() - t_mark
+                history.append(dict(step=step, train_s=round(t_train, 2), loss=float(loss.detach()), lr=opt.param_groups[0]["lr"], **peek()))
+                t_mark = time.perf_counter()
         with torch.no_grad():
             S = torch.cat([m(f(Xt[j:j + 500]).to(dev)).cpu() for j in range(0, len(yt), 500)])
         acc = 100.0 * (S.argmax(1) == yt).float().mean().item()
         ce = F.cross_entropy(S, yt).item()
         rec = dict(exp="32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
-                   train_s=t_train, version=p2.__version__, torch=torch.__version__)
+                   train_s=t_train, history=history, version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "a", encoding="utf-8") as fo:

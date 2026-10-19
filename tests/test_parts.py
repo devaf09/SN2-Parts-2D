@@ -152,3 +152,13 @@ def test_correlator_shift_equivariant():
         a = m(u)
         b = m(torch.roll(u, (5, 7), (-2, -1)))
     assert torch.allclose(torch.roll(a, (5, 7), (-2, -1)), b, atol=1e-4)
+
+
+def test_train_history():
+    """学習の経過の記録: log_every ごとに、ステップ・時間・損失・学習率と log_fn の値が残る。"""
+    X, y = torch.rand(40, 16, 16), torch.randint(3, (40,))
+    net = p2.Net2D(16, 3, ["xy"] * 2, patches=2)
+    p2.train(net, X, y, steps=6, batch_size=8, to_input=p2.image_to_field, schedule="cosine",
+             log_every=3, log_fn=lambda m: {"acc": p2.evaluate(m, X, y, to_input=p2.image_to_field)})
+    assert [h["step"] for h in net.history] == [3, 6]
+    assert {"train_s", "loss", "lr", "acc"} <= set(net.history[0])
