@@ -54,6 +54,7 @@ def main():
     ap.add_argument("--n_per_class", type=int, default=0, help="子の訓練データを 1 クラスこの枚数に（0 = 全部）")
     ap.add_argument("--w", type=float, default=0.3)
     ap.add_argument("--variants", nargs="+", default=["indep", "same", "derive", "front"])
+    ap.add_argument("--sched", default="const", choices=["const", "cosine"], help="学習率の変え方（実験25 で cosine）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp20.txt")
     a = ap.parse_args()
@@ -66,7 +67,7 @@ def main():
     coarse = torch.zeros_like(ytr)
     for gi, g in enumerate(GROUPS):
         coarse[torch.isin(ytr, torch.tensor(g))] = COARSE_WIN[gi]
-    parent = p2.train(p2.Net2D(64, 10, kinds, seed=a.seed).to(dev), Xtr, coarse, steps=a.steps_parent, seed=a.seed, to_input=f)
+    parent = p2.train(p2.Net2D(64, 10, kinds, seed=a.seed).to(dev), Xtr, coarse, steps=a.steps_parent, seed=a.seed, to_input=f, schedule=a.sched)
     ct = torch.zeros_like(yte)
     for gi, g in enumerate(GROUPS):
         ct[torch.isin(yte, torch.tensor(g))] = COARSE_WIN[gi]
@@ -89,7 +90,7 @@ def main():
             else:
                 net = freeze_front(copy.deepcopy(parent), 8)
             G = p2.generic_images(4000, 64, seed=5000 + 100 * gi + a.seed)
-            p2.train(net, Xtr[m], ytr[m], steps=a.steps_child, seed=a.seed + gi, to_input=f, reject=G, reject_weight=a.w)
+            p2.train(net, Xtr[m], ytr[m], steps=a.steps_child, seed=a.seed + gi, to_input=f, reject=G, reject_weight=a.w, schedule=a.sched)
             children.append(net)
             tm = torch.isin(yte, torch.tensor(g))
             s = scores(net, Xte[tm])

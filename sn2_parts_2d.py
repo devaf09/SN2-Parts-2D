@@ -22,6 +22,7 @@ Sin-CNN2 の SinWave（1 次元の光の場、https://github.com/devaf09/Sin-CNN
                                   r は中心 (cx, cy)・楕円の軸 a, b・角度 θ で決まる距離。中心を遠くへ置くと ② になる
 
 変更履歴（改良したらここを更新し、__version__ を上げる）
+    0.9.0 (2026-10-19)  train(schedule="cosine"): 学習率を最後に 0 まで下げる（実験17・21 で学習の谷が消える。推奨）。
     0.8.0 (2026-10-19)  Net2D(sinc_centers=...): ④⑤ の波紋の中心の初期配置（でたらめ・格子・格子 + ずらし）。
     0.7.0 (2026-10-18)  ⑤ 楕円で大きさを変えられる減衰する波紋 plate_sinc_ellipse（持ち主の案）と Net2D の "sinc_e"。
                         Net2D(sinc_depth=...) で ④ の初期の深さを変えられる。
@@ -42,7 +43,7 @@ import math
 
 import torch
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 
 # =============================================================================================
@@ -460,12 +461,14 @@ def generic_images(n: int, L: int = 64, seed: int = 0, noise: float = 0.1) -> to
 
 def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1500, lr: float = 0.01,
           batch_size: int = 256, seed: int = 0, to_input=None, reject: torch.Tensor | None = None,
-          reject_weight: float = 1.0) -> torch.nn.Module:
+          reject_weight: float = 1.0, schedule: str = "const") -> torch.nn.Module:
     """クロスエントロピーで学習する（Adam）。X の一部を to_input で変換してから net に渡す（例: image_to_field）。
     reject に「担当なし」の絵（generic_images）を渡すと、それを見たときはどの窓も同じ明るさになる（答えを出さない）ようにも学ぶ。
-    融合する技能はこれで学習しておくと、相手のデータなしで足すだけの融合が成り立つ（実験10: 80.8 → 100%）。"""
+    融合する技能はこれで学習しておくと、相手のデータなしで足すだけの融合が成り立つ（実験10: 80.8 → 100%）。
+    schedule="cosine" で学習率を最後に 0 まで下げる（学習の谷で終わらない。実験17・21。推奨）。"""
     dev = _device(net)
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, steps) if schedule == "cosine" else None
     g = torch.Generator().manual_seed(seed)
     to_input = to_input or (lambda v: v)
     for _ in range(steps):
@@ -477,6 +480,8 @@ def train(net: torch.nn.Module, X: torch.Tensor, y: torch.Tensor, steps: int = 1
         opt.zero_grad()
         loss.backward()
         opt.step()
+        if sched is not None:
+            sched.step()
     return net
 
 
