@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import sn2_parts_2d as p2  # noqa: E402
 import worddata  # noqa: E402
 from exp31_text2d import GRU, LogReg  # noqa: E402
+import exp40_inputs  # noqa: E402
 from exp40_inputs import EncNet  # noqa: E402
 
 PROMPTS = ["やぁ、", "こんにちは。今日は", "よろしくお願い", "ありがとう", "東京の", "私は", "この商品は", "明日の天気は"]
@@ -46,6 +47,7 @@ def main():
     ap.add_argument("--C", type=int, default=1024)
     ap.add_argument("--V", type=int, default=4096)
     ap.add_argument("--layers", type=int, default=32)
+    ap.add_argument("--L", type=int, default=64, help="場の大きさ（実験56: 大きくして頭打ちを確かめる）")
     ap.add_argument("--patches", type=int, default=16)
     ap.add_argument("--K", type=int, default=256)
     ap.add_argument("--max_train", type=int, default=60000)
@@ -54,6 +56,7 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp52.txt")
     a = ap.parse_args()
+    exp40_inputs.L = a.L
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = worddata.load(a.n, a.C, a.max_train, 10000, a.seed, a.V)
     base = dict(exp="52", **vars(a), other_share=100.0 * (yt == a.C - 1).float().mean().item(),
@@ -110,6 +113,7 @@ def main():
         rec = dict(base, test_acc=100.0 * (S.argmax(1) == yt).float().mean().item(), test_ce=F.cross_entropy(S, yt).item(),
                    test_top5=100.0 * (S.topk(5, 1).indices == yt[:, None]).any(1).float().mean().item(),
                    params=sum(p.numel() for p in m.parameters() if p.requires_grad), train_s=t_train, history=history, demo=demo,
+                   peak_MB=(torch.cuda.max_memory_allocated() / 2**20 if dev.type == "cuda" else 0),
                    version=p2.__version__, torch=torch.__version__)
         if a.method == "plates":
             rec["pos_brightness"] = torch.exp(m.w.detach()).cpu().tolist()
