@@ -232,7 +232,17 @@ def main():
         if j >= 0:
             s = cod @ cod[j] + torch.where(content, 0.0, -1e9)
             near[q] = [info["out_vocab"][t] for t in s.topk(9).indices.tolist() if t != j][:8]
-    rec = dict(exp="54", **vars(a), results=res, test_acc=res["optical"]["acc"], test_ce=res["optical"]["ce"],
+    # 差分（持ち主の案、2026-10-20）: 男 → 女 の差を 父 に足すと 母 になるか（符号の上で b − a + c に一番近い内容語）
+    analogy = {}
+    ov = info["out_vocab"]
+    for x1, x2, x3 in (("男性", "女性", "彼"), ("夫", "妻", "男性"), ("彼", "彼女", "夫"), ("行く", "行っ", "来る"), ("見る", "見", "行く"), ("今日", "明日", "朝"), ("多い", "少ない", "良い"), ("上", "下", "前")):
+        if all(x in ov for x in (x1, x2, x3)):
+            v = cod[ov.index(x2)] - cod[ov.index(x1)] + cod[ov.index(x3)]
+            s = cod @ v + torch.where(content, 0.0, -1e9)
+            for x in (x1, x2, x3):
+                s[ov.index(x)] = -1e9
+            analogy[f"{x1}→{x2} = {x3}→"] = [ov[t] for t in s.topk(5).indices.tolist()]
+    rec = dict(exp="54", **vars(a), results=res, analogy=analogy, test_acc=res["optical"]["acc"], test_ce=res["optical"]["ce"],
                params=sum(p.numel() for p in m.parameters() if p.requires_grad), train_s=train_s, history=history, near=near,
                content_share=100.0 * content[Yt].float().mean().item(), version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
