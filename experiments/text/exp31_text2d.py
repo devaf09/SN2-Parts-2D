@@ -121,6 +121,33 @@ class Recency(torch.nn.Module):
         return self.inner(u * amp[None, :, None])
 
 
+class ColorPos(torch.nn.Module):
+    """位置ごとに色（波長）を分ける（実験39）。位置 m の帯の光だけを色 m として別々に通し、最後に明るさを足す。
+    色が違う光どうしは干渉しないので、位置の情報を干渉に頼らずに持てる（1 次元の「色ごと」の入力の 2 次元版）。計算は位置の数倍。"""
+
+    def __init__(self, inner, n):
+        super().__init__()
+        self.inner, self.n = inner, n
+        self.register_buffer("band", (torch.arange(L) * n // L).long())
+
+    def forward(self, u):
+        net = self.inner.inner if isinstance(self.inner, Recency) else self.inner
+        amp = 1.0
+        if isinstance(self.inner, Recency):
+            a = torch.exp(self.inner.w)[self.band]
+            amp = (a / a.pow(2).mean().sqrt())[None, :, None]
+        u = u * amp
+        masks = (self.band[None, :] == torch.arange(self.n, device=u.device)[:, None]).float()      # (n, L) 帯ごと
+        v = u[:, None] * masks[None, :, :, None]                                                     # (N, n, L, L)
+        B = v.shape[0]
+        v = v.reshape(B * self.n, L, L)
+        for d in range(len(net.kinds)):
+            v = p2.normalize(p2.propagate(p2.apply_plate(v, net.plate_phase(d)), net.H))
+        I = p2.intensity(p2.lens(v)).reshape(B, self.n, L, L).mean(1)
+        I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
+        return net.gain * p2.read_windows(I, net.det) + net.bias
+
+
 class GRU(torch.nn.Module):
     def __init__(self, V, C, hid=128):
         super().__init__()
@@ -153,6 +180,7 @@ def main():
     ap.add_argument("--layers", type=int, default=16, help="plates: 板の枚数（実験35）")
     ap.add_argument("--patches", type=int, default=8, help="plates: 区画（① は帯 patches²/2 本ずつ、実験35）")
     ap.add_argument("--recency", action="store_true", help="位置ごとの明るさを学習する（実験33）")
+    ap.add_argument("--color", action="store_true", help="位置ごとに色を分ける（実験39）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
@@ -184,6 +212,8 @@ def main():
             m, f = LogReg(V, C, a.n), (lambda v: v)
         if a.recency:
             m = Recency(m, a.n)
+        if a.color:
+            m = ColorPos(m, a.n)
         m = m.to(dev)
         n_params = sum(p.numel() for p in m.parameters() if p.requires_grad)
         lr = 0.003 if a.method == "logreg" else 0.01
