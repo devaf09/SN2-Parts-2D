@@ -83,6 +83,28 @@ class CorrNet(torch.nn.Module):
         return self.gain * p2.read_windows(I, self.det) + self.bias
 
 
+class PlatesNL(torch.nn.Module):
+    """板 ① を 2 つの段に分け、間で明るさを測って光を出し直す（光の非線形、実験36）。画像の実験28 で見分けを大きく強くした形を板で。
+    1 段目: 板 k 枚（回折しながら）→ 明るさ → 平方根を振幅に → 2 段目: 板 k 枚 → レンズ → 窓。"""
+
+    def __init__(self, C, layers=16, patches=8, seed=0, stages=2):
+        super().__init__()
+        k = layers // stages
+        self.parts = torch.nn.ModuleList([p2.Net2D(L, C, ["xy"] * k, patches=patches, seed=seed + 31 * i) for i in range(stages)])
+
+    def forward(self, u):
+        for i, net in enumerate(self.parts):
+            if i > 0:
+                I = p2.intensity(u)
+                u = torch.sqrt(I / (I.mean((-2, -1), keepdim=True) + 1e-12) + 1e-12).to(torch.complex64)
+            for d in range(len(net.kinds)):
+                u = p2.normalize(p2.propagate(p2.apply_plate(u, net.plate_phase(d)), net.H))
+        last = self.parts[-1]
+        I = p2.intensity(p2.lens(u))
+        I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
+        return last.gain * p2.read_windows(I, last.det) + last.bias
+
+
 class Recency(torch.nn.Module):
     """位置ごとの明るさを学習する（実験33）。帯 m の光に e^{w_m} を掛け、全体の明るさをそろえる。
     1 次元の実験52 では、直前の文字ほど明るくすると良くなった。初期値は直前ほど明るい e^{(m−n+1)·0.3}。"""
@@ -123,7 +145,7 @@ class LogReg(torch.nn.Module):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", default="plates", choices=["plates", "corr1", "corrNL2", "corrNL3", "gru", "logreg", "ngram"])
+    ap.add_argument("--method", default="plates", choices=["plates", "platesNL2", "platesNL3", "corr1", "corrNL2", "corrNL3", "gru", "logreg", "ngram"])
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
@@ -134,7 +156,7 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
-    out = a.out or ("results/exp35.txt" if (a.layers != 16 or a.patches != 8) else None) or ("results/exp33.txt" if a.recency else "results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
+    out = a.out or ("results/exp36.txt" if a.method.startswith("platesNL") else None) or ("results/exp35.txt" if (a.layers != 16 or a.patches != 8) else None) or ("results/exp33.txt" if a.recency else "results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, a.max_train, 10000, a.seed)
     V, C = info["V_in"], info["C"]
@@ -149,6 +171,9 @@ def main():
         torch.manual_seed(a.seed)
         if a.method == "plates":
             m = p2.Net2D(L, C, ["xy"] * a.layers, patches=a.patches, seed=a.seed)
+            f = lambda v: encode(v, a.n, V)
+        elif a.method.startswith("platesNL"):
+            m = PlatesNL(C, a.layers, a.patches, a.seed, int(a.method[-1]))
             f = lambda v: encode(v, a.n, V)
         elif a.method.startswith("corr"):
             m = CorrNet({"corr1": 1, "corrNL2": 2, "corrNL3": 3}[a.method], C, a.seed)
@@ -192,7 +217,7 @@ def main():
             S = torch.cat([m(f(Xt[j:j + 500]).to(dev)).cpu() for j in range(0, len(yt), 500)])
         acc = 100.0 * (S.argmax(1) == yt).float().mean().item()
         ce = F.cross_entropy(S, yt).item()
-        rec = dict(exp="35" if (a.layers != 16 or a.patches != 8) else "33" if a.recency else "32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
+        rec = dict(exp="36" if a.method.startswith("platesNL") else "35" if (a.layers != 16 or a.patches != 8) else "33" if a.recency else "32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
                    train_s=t_train, history=history, version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
