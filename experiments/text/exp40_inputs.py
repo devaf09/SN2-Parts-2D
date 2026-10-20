@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--layers", type=int, default=32)
     ap.add_argument("--patches", type=int, default=16)
     ap.add_argument("--n", type=int, default=8)
+    ap.add_argument("--focus", type=float, default=0.0, help="正解の窓に入る光の割合を上げる損失の重み（実験43）")
     ap.add_argument("--K", type=int, default=0, help="窓の数（0 なら 1 クラス 1 窓）。符号で読む（実験42）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
@@ -128,7 +129,12 @@ def main():
         return r
     for step in range(1, a.steps + 1):
         i = torch.randint(len(y), (256,), generator=g)
-        loss = F.cross_entropy(m(X[i].to(dev)), y[i].to(dev))
+        if a.focus > 0:   # 正解の窓に光を集める: −log（正解の窓の明るさの和 / スクリーン全体の明るさ）
+            I = m.net.screen(m.field(X[i].to(dev)))
+            frac = (I * m.net.det[y[i].to(dev)]).sum((-2, -1)) * 16 / I.sum((-2, -1))
+            loss = F.cross_entropy(m.net.gain * p2.read_windows(I, m.net.det) + m.net.bias, y[i].to(dev)) - a.focus * torch.log(frac + 1e-9).mean()
+        else:
+            loss = F.cross_entropy(m(X[i].to(dev)), y[i].to(dev))
         opt.zero_grad()
         loss.backward()
         opt.step()
