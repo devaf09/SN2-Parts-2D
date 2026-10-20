@@ -41,10 +41,13 @@ L = 64
 class EncNet(torch.nn.Module):
     """文字の番号 (B, n) → 光の場（入れ方 enc、位置ごとの明るさを学習）→ 板 → レンズ → 窓。"""
 
-    def __init__(self, enc, n, V, C, layers=32, patches=16, seed=0):
+    def __init__(self, enc, n, V, C, layers=32, patches=16, seed=0, K=0):
         super().__init__()
         self.enc, self.n = enc, n
-        self.net = p2.Net2D(L, C, ["xy"] * layers, patches=patches, seed=seed)
+        # K > 0: 窓を K 個にして、クラスを窓の模様（符号、学習する）で読む（画像の実験22 の形。実験42）
+        self.net = p2.Net2D(L, K or C, ["xy"] * layers, patches=patches, seed=seed)
+        self.codes = torch.nn.Parameter(torch.randn(C, K, generator=torch.Generator().manual_seed(seed)) if K else torch.zeros(0))
+        self.temp = torch.nn.Parameter(torch.tensor(10.0))
         self.w = torch.nn.Parameter(0.3 * (torch.arange(n, dtype=torch.float32) - n + 1))
         g = stride(L * L)
         pos = (torch.arange(V) * g) % (L * L)
@@ -88,7 +91,10 @@ class EncNet(torch.nn.Module):
         return u / (u.abs().pow(2).mean((-2, -1), keepdim=True) + 1e-12).sqrt()
 
     def forward(self, X):
-        return self.net(self.field(X))
+        if self.codes.numel() == 0:
+            return self.net(self.field(X))
+        I = self.net.screen(self.field(X))
+        return p2.code_scores(p2.read_windows(I, self.net.det), self.codes, 1.0) * self.temp
 
 
 def main():
@@ -97,6 +103,7 @@ def main():
     ap.add_argument("--layers", type=int, default=32)
     ap.add_argument("--patches", type=int, default=16)
     ap.add_argument("--n", type=int, default=8)
+    ap.add_argument("--K", type=int, default=0, help="窓の数（0 なら 1 クラス 1 窓）。符号で読む（実験42）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--device", default="cuda")
@@ -105,7 +112,7 @@ def main():
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, 60000, 10000, a.seed)
     torch.manual_seed(a.seed)
-    m = EncNet(a.enc, a.n, info["V_in"], info["C"], a.layers, a.patches, a.seed).to(dev)
+    m = EncNet(a.enc, a.n, info["V_in"], info["C"], a.layers, a.patches, a.seed, a.K).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=0.01)
     sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     g = torch.Generator().manual_seed(a.seed)
