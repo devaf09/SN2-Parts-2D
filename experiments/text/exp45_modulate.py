@@ -40,9 +40,9 @@ L = 64
 
 
 class ModNet(torch.nn.Module):
-    def __init__(self, n, V, C, per=2, patches=8, mask="rand", seed=0, K=0, depth=1.0):
+    def __init__(self, n, V, C, per=2, patches=8, mask="rand", seed=0, K=0, depth=1.0, logread=False):
         super().__init__()
-        self.n, self.per = n, per
+        self.n, self.per, self.logread = n, per, logread
         self.net = p2.Net2D(L, K or C, ["xy"] * (n * per), patches=patches, seed=seed)
         if mask == "rand":
             g = torch.Generator().manual_seed(777)
@@ -69,6 +69,8 @@ class ModNet(torch.nn.Module):
                 d += 1
         I = p2.intensity(p2.lens(u))
         I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
+        if self.logread:   # 明るさを対数で読む（1 点に光が集まると明るさの幅が極端に大きくなり、学習が進まなくなるため）
+            I = torch.log1p(I)
         w = p2.read_windows(I, self.net.det)
         if self.codes.numel() == 0:
             return self.net.gain * w + self.net.bias
@@ -83,6 +85,7 @@ def main():
     ap.add_argument("--per", type=int, default=2, help="文字 1 つごとの学習する板の枚数")
     ap.add_argument("--patches", type=int, default=8)
     ap.add_argument("--K", type=int, default=0)
+    ap.add_argument("--logread", action="store_true", help="明るさを対数で読む")
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=1500)
@@ -93,7 +96,7 @@ def main():
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, 60000, 10000, a.seed)
     torch.manual_seed(a.seed)
     if a.mode == "mul":
-        m = ModNet(a.n, info["V_in"], info["C"], a.per, a.patches, a.mask, a.seed, a.K, a.depth).to(dev)
+        m = ModNet(a.n, info["V_in"], info["C"], a.per, a.patches, a.mask, a.seed, a.K, a.depth, a.logread).to(dev)
     else:
         m = EncNet("bands", a.n, info["V_in"], info["C"], a.n * a.per, a.patches, a.seed, a.K).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=0.01)
