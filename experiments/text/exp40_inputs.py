@@ -58,7 +58,7 @@ class EncNet(torch.nn.Module):
         self.register_buffer("xx", y[None, :].expand(L, L).clone())
         h = L / n
         centers = (torch.arange(n, dtype=torch.float32) + 0.5) * h
-        if enc == "bands":
+        if enc in ("bands", "pairmul", "pairhash"):
             M = (torch.arange(L)[None, :] * n // L == torch.arange(n)[:, None]).float()[:, :, None].expand(n, L, L)
         elif enc in ("blur", "smear"):
             M = (torch.arange(L)[None, :] * n // L == torch.arange(n)[:, None]).float()
@@ -82,6 +82,19 @@ class EncNet(torch.nn.Module):
         kx, ky = self.kx[X], self.ky[X]                                # (B, n)
         ph = 2 * math.pi * (kx[..., None, None] * self.xx + ky[..., None, None] * self.yy) / L + self.ref[None]
         W = torch.polar(torch.ones_like(ph), ph)                       # (B, n, L, L)
+        if self.enc in ("pairmul", "pairhash"):
+            # 一番古い帯（学習でほぼ使われない、実験40）に、直前 2 文字の組を 1 本の平面波として入れる（実験46）
+            a1, a2 = X[:, -1], X[:, -2]
+            if self.enc == "pairmul":   # 2 文字の平面波の掛け算 = 向きの足し算（2 文字目は別の歩幅で並べて重なりを減らす）
+                c2 = (a2 * 2971) % (L * L)
+                kx2, ky2 = (c2 % L).float(), (c2 // L).float()
+                kxp, kyp = self.kx[a1] + kx2, self.ky[a1] + ky2
+            else:                       # 2 文字の組ごとに決まった向き（組の番号を散らす）
+                c = (a2 * 512 + a1) * 2654435761 % (L * L)
+                kxp, kyp = (c % L).float(), (c // L).float()
+            php = 2 * math.pi * (kxp[:, None, None] * self.xx + kyp[:, None, None] * self.yy) / L
+            W = W.clone()
+            W[:, 0] = torch.polar(torch.ones_like(php), php)
         if self.enc == "smear":
             pad = torch.cat([W[:, :1], W, W[:, -1:]], 1)
             W = (pad[:, :-2] + pad[:, 1:-1] + pad[:, 2:]) / 3
@@ -99,8 +112,9 @@ class EncNet(torch.nn.Module):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--enc", default="spread", choices=["bands", "blur", "smear", "rainbow", "spread", "rings"])
+    ap.add_argument("--enc", default="spread", choices=["bands", "blur", "smear", "rainbow", "spread", "rings", "pairmul", "pairhash"])
     ap.add_argument("--layers", type=int, default=32)
+    ap.add_argument("--w0", type=float, default=None, help="一番古い帯の明るさの初期値（対数、実験46 の組の帯）")
     ap.add_argument("--patches", type=int, default=16)
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--focus", type=float, default=0.0, help="正解の窓に入る光の割合を上げる損失の重み（実験43）")
@@ -114,6 +128,9 @@ def main():
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, 60000, 10000, a.seed)
     torch.manual_seed(a.seed)
     m = EncNet(a.enc, a.n, info["V_in"], info["C"], a.layers, a.patches, a.seed, a.K).to(dev)
+    if a.w0 is not None:
+        with torch.no_grad():
+            m.w[0] = a.w0
     opt = torch.optim.Adam(m.parameters(), lr=0.01)
     sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     g = torch.Generator().manual_seed(a.seed)
