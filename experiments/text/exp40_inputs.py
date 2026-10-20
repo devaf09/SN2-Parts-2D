@@ -113,6 +113,7 @@ class EncNet(torch.nn.Module):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--enc", default="spread", choices=["bands", "blur", "smear", "rainbow", "spread", "rings", "pairmul", "pairhash"])
+    ap.add_argument("--L", type=int, default=64, help="場の大きさ（実験47: 間引き・等価時間標本化で小さく）")
     ap.add_argument("--layers", type=int, default=32)
     ap.add_argument("--w0", type=float, default=None, help="一番古い帯の明るさの初期値（対数、実験46 の組の帯）")
     ap.add_argument("--patches", type=int, default=16)
@@ -124,6 +125,8 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp40.txt")
     a = ap.parse_args()
+    global L
+    L = a.L
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, 60000, 10000, a.seed)
     torch.manual_seed(a.seed)
