@@ -128,11 +128,13 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--max_train", type=int, default=60000)
+    ap.add_argument("--layers", type=int, default=16, help="plates: 板の枚数（実験35）")
+    ap.add_argument("--patches", type=int, default=8, help="plates: 区画（① は帯 patches²/2 本ずつ、実験35）")
     ap.add_argument("--recency", action="store_true", help="位置ごとの明るさを学習する（実験33）")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
-    out = a.out or ("results/exp33.txt" if a.recency else "results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
+    out = a.out or ("results/exp35.txt" if (a.layers != 16 or a.patches != 8) else None) or ("results/exp33.txt" if a.recency else "results/exp32.txt" if a.method.startswith("corr") else "results/exp31.txt")
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(a.n, 64, a.max_train, 10000, a.seed)
     V, C = info["V_in"], info["C"]
@@ -146,7 +148,7 @@ def main():
     else:
         torch.manual_seed(a.seed)
         if a.method == "plates":
-            m = p2.Net2D(L, C, ["xy"] * 16, seed=a.seed)
+            m = p2.Net2D(L, C, ["xy"] * a.layers, patches=a.patches, seed=a.seed)
             f = lambda v: encode(v, a.n, V)
         elif a.method.startswith("corr"):
             m = CorrNet({"corr1": 1, "corrNL2": 2, "corrNL3": 3}[a.method], C, a.seed)
@@ -190,7 +192,7 @@ def main():
             S = torch.cat([m(f(Xt[j:j + 500]).to(dev)).cpu() for j in range(0, len(yt), 500)])
         acc = 100.0 * (S.argmax(1) == yt).float().mean().item()
         ce = F.cross_entropy(S, yt).item()
-        rec = dict(exp="33" if a.recency else "32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
+        rec = dict(exp="35" if (a.layers != 16 or a.patches != 8) else "33" if a.recency else "32" if a.method.startswith("corr") else "31", **vars(a), test_acc=acc, test_ce=ce, params=n_params,
                    train_s=t_train, history=history, version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
