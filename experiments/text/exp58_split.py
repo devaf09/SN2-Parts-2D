@@ -39,6 +39,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="word", choices=["word", "char"], help="char = 文字の課題（実験62。直前 8 文字、64 クラス、入力 512 字）")
     ap.add_argument("--m", type=int, default=2, help="各 2DTG に見せる直前の単位の数（実験62）")
+    ap.add_argument("--fixed_codes", action="store_true", help="符号を学習せず、全部の 2DTG で同じでたらめな符号にする（デジタルの重みを増やさない対照、実験64）")
     ap.add_argument("--G", type=int, default=8, help="2DTG の数（グループの数）")
     ap.add_argument("--layers", type=int, default=16)
     ap.add_argument("--patches", type=int, default=16)
@@ -69,7 +70,11 @@ def main():
         own, other = (grp == gi).nonzero().squeeze(1), (grp != gi).nonzero().squeeze(1)
         torch.manual_seed(a.seed * 100 + gi)
         m = EncNet("bands", a.m, a.V, C + 1, a.layers, a.patches, a.seed * 100 + gi, a.K).to(dev)
-        opt = torch.optim.Adam(m.parameters(), lr=0.01)
+        if a.fixed_codes:   # 全部の 2DTG で同じ符号（学習しない）。学習するのは光路（板）と温度だけ
+            with torch.no_grad():
+                m.codes.copy_(torch.randn(C + 1, a.K, generator=torch.Generator().manual_seed(4321)))
+            m.codes.requires_grad_(False)
+        opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=0.01)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
         g = torch.Generator().manual_seed(a.seed * 100 + gi)
         nr = int(256 * a.reject)
@@ -122,7 +127,7 @@ def main():
         v, i = q.topk(5)
         demo[ptxt] = dict(words=ws, top5=[(info["out_vocab"][j], round(100 * float(x), 1)) for x, j in zip(v, i)])
     rec = dict(exp="58", **vars(a), results=res, per_grain=per, test_acc=res["add"]["acc"], test_ce=res["add"]["ce"], test_top5=res["add"]["top5"],
-               params=sum(p.numel() for m in grains for p in m.parameters() if p.requires_grad), train_s=t_all, demo=demo,
+               params=sum(p.numel() for m in grains for p in m.parameters() if p.requires_grad), digital_code_params=sum(m.codes.numel() for m in grains if m.codes.requires_grad), train_s=t_all, demo=demo,
                version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)

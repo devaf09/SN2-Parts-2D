@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--C", type=int, default=1024)
     ap.add_argument("--V", type=int, default=4096)
     ap.add_argument("--layers", type=int, default=32)
+    ap.add_argument("--fixed_codes", action="store_true", help="符号を学習しない（でたらめな符号に固定、実験64）")
     ap.add_argument("--layout", default="stride", choices=["stride", "embed", "embed_rand"], help="語を光の向きに並べる方法（実験60）。embed = 使われ方の近い語を近い向きに、embed_rand = 同じ並べ方を語の間でかき混ぜたもの（比較）")
     ap.add_argument("--z", type=float, default=64.0, help="板の間隔（実験59: 厚いホログラムに近づける）")
     ap.add_argument("--L", type=int, default=64, help="場の大きさ（実験56: 大きくして頭打ちを確かめる）")
@@ -72,6 +73,10 @@ def main():
         torch.manual_seed(a.seed)
         if a.method == "plates":
             m = EncNet("bands", a.n, a.V, a.C, a.layers, a.patches, a.seed, a.K)
+            if a.fixed_codes:
+                with torch.no_grad():
+                    m.codes.copy_(torch.randn(a.C, a.K, generator=torch.Generator().manual_seed(4321)))
+                m.codes.requires_grad_(False)
             if a.layout != "stride":
                 kx, ky, _ = worddata.embed_layout(info, a.L)
                 if a.layout == "embed_rand":
@@ -87,7 +92,7 @@ def main():
             m = LogReg(a.V, a.C, a.n)
         m = m.to(dev)
         lr = 0.01 if a.method == "plates" else 0.003
-        opt = torch.optim.Adam(m.parameters(), lr=lr)
+        opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=lr)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
         g = torch.Generator().manual_seed(a.seed)
         history, t_train, t_mark = [], 0.0, time.perf_counter()
