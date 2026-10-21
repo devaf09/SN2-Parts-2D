@@ -2,7 +2,7 @@
 
 画像のような 2 次元の入力を光の場にして、**模様のある透明な板と回折だけ**で処理する部品（Python の関数）を作っています。重み行列（ニューロンのマップ）は持ちません。
 
-> **版 0.10.0。画像認識の区切り（実験00〜30）。** 次は、2 次元で言語（LLM のようなもの）を目指します（`experiments/text/`）。
+> **版 0.11.0。画像認識（実験00〜30）と言語（実験31〜65）の区切り。** 一番良かった組み合わせは [docs/best_configs.md](docs/best_configs.md)、有望なアイディアは [docs/ideas.md](docs/ideas.md)、部品の評価は [docs/parts_review.md](docs/parts_review.md)。
 
 ![10 本の光路の融合で、どこに何の数字があるかを出す](docs/images/exp30_ten.png)
 
@@ -47,6 +47,20 @@ flowchart LR
 - アナログで作ったとき、板が 1 画素ずれるとほぼ当てずっぽうになる（実験05。模様の精度は 16 段階で足りる）。
 
 目標への到達度は [docs/scoreboard.md](docs/scoreboard.md)。実験の歩みは高校生向けの説明 [docs/experiments_guide.md](docs/experiments_guide.md)、数字の正本は [NOTES.md](NOTES.md)。
+
+## 言語でできたこと・分かったこと（実験31〜65）
+
+文章（CC-100 日本語 約 60 万字）で、直前の文字・単語から次の文字・単語を当てる課題です。
+
+| できたこと・分かったこと | 数字 | 実験 |
+|---|---|---|
+| **小さな光路（2DTG）に担当を分け、別々に学んで足すだけで融合**すると、文字の課題で GRU・3-gram に並ぶ | **54.0%**（光路 1 本の最良 50.1、GRU 53.3〜54.1、3-gram 53.7）、学習する数はほぼ同じ | 58・62 |
+| 単語（形態素）の予測。次の単語の確率を出す（ありがとう → ござい 83%） | 分担して 36.0〜36.4%（GRU 36.9、3-gram 36.4。ただし符号の重みが増える、実験64） | 52・58 |
+| 1 本の光路は、全部の語が同じ板を共有するので、覚えられる対応表が小さい（図 [capacity.png](docs/images/capacity.png)） | 「1 語 → 次の語」の表でも 29.6%（表 33.6%）。板を倍にして +1 点 | 55・56 |
+| データが少ないときは光路が強い（覚えすぎにくい） | 2 万件で光路 27.3% > GRU 25.7% | 57 |
+| 振幅 + 位相の板は、位相だけの板より良い | +2.2 点（29.0 → 31.2%） | 63 |
+| 光路は逆向きに通せる（位相まで送り返せば入力に完全に戻る）。明るさだけで読むと戻らない | 位相あり 100%、明るさだけでは偶然並み | 65 |
+| 効かなかったもの: 1 次元で効いた照明の工夫・参照波、光の記憶、鏡の往復、短冊、板の間隔、語の並べ方、関連度グレイン | ばらつきの範囲 | 34・48・50・51・54・59・60 |
 
 ## いちばん簡単な使い方
 
@@ -109,7 +123,7 @@ both = p2.merge([a, b])                                          # 外せば元�
 | `sn2_parts_2d.py` | 部品（1 ファイル、PyTorch のみ）。先頭に変更履歴と `__version__` |
 | `tests/` | 部品の確認（`python -m pytest tests -q`、CPU で数秒） |
 | `experiments/image/` | 画像認識の実験（実験00〜30）。`expNN_名前.py`、合成課題 `tasks2d.py`、比較相手 `baselines2d.py`、条件 `sweeps/sweepNN.sh` |
-| `experiments/text/` | 言語の実験（これから） |
+| `experiments/text/` | 言語の実験（実験31〜65）。中身の一覧は [experiments/text/README.md](experiments/text/README.md) |
 | `results/expNN.txt` | 結果（1 回の実行 = 1 行の JSON）。実験番号は画像・言語で通し |
 | `tools/` | 集計（`summarize.py`）、ポイント表（`scoreboard.py`）、図（`fig_*.py`）、データの取得（`fetch_mnist.py`） |
 | `docs/` | 説明資料（`experiments_guide.md`）、ポイント表、設計のメモ、図（`images/`） |
@@ -134,4 +148,6 @@ python tools/summarize.py results/exp15.txt --rows method --cols data
 - 合成課題（実験00〜14）はすべてプログラムの中で作った入力です。
 - **MNIST**（手書き数字、実験15〜）: Yann LeCun, Corinna Cortes。ライセンス CC BY-SA 3.0。torchvision の置き場から `python tools/fetch_mnist.py mnist` で `data/` に取得します。
 - **Fashion-MNIST**（服の絵、実験15〜）: Zalando Research（[github.com/zalandoresearch/fashion-mnist](https://github.com/zalandoresearch/fashion-mnist)）。ライセンス MIT。`python tools/fetch_mnist.py fashion` で取得します。
+- **CC-100 日本語**（言語、実験31〜）: Common Crawl 由来（Conneau et al. 2020 / Wenzek et al. 2020）。Sin-CNN2 が取得した先頭 約 60 万字を `data/cc100_ja.txt` に写して使っています。
+- 単語に切るのに **MeCab**（fugashi 1.5.2、MIT / 辞書 unidic-lite 1.0.8、BSD 等）を使います（`pip install fugashi unidic-lite`）。
 - データ自体はリポジトリに入れていません（`data/` は .gitignore）。
