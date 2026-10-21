@@ -1,0 +1,1 @@
+{"exp": "67", "n_models": 4, "top20_overlap": {"rev_1": 7.14, "rev_prod_4": 9.64, "refine_top50": 10.62, "forward_bayes_1": 11.94, "forward_bayes_4": 12.24}, "cloze_acc": {"left_forward": 21.25, "right_reverse": 17.95, "right_reverse_prod": 19.1, "both": 32.35, "both_prod": 33.75}, "cloze_n": 2000}
