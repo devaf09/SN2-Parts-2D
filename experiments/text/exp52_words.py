@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--C", type=int, default=1024)
     ap.add_argument("--V", type=int, default=4096)
     ap.add_argument("--layers", type=int, default=32)
+    ap.add_argument("--layout", default="stride", choices=["stride", "embed", "embed_rand"], help="語を光の向きに並べる方法（実験60）。embed = 使われ方の近い語を近い向きに、embed_rand = 同じ並べ方を語の間でかき混ぜたもの（比較）")
     ap.add_argument("--z", type=float, default=64.0, help="板の間隔（実験59: 厚いホログラムに近づける）")
     ap.add_argument("--L", type=int, default=64, help="場の大きさ（実験56: 大きくして頭打ちを確かめる）")
     ap.add_argument("--patches", type=int, default=16)
@@ -71,6 +72,13 @@ def main():
         torch.manual_seed(a.seed)
         if a.method == "plates":
             m = EncNet("bands", a.n, a.V, a.C, a.layers, a.patches, a.seed, a.K)
+            if a.layout != "stride":
+                kx, ky, _ = worddata.embed_layout(info, a.L)
+                if a.layout == "embed_rand":
+                    perm = torch.randperm(len(kx), generator=torch.Generator().manual_seed(7))
+                    kx, ky = kx[perm], ky[perm]
+                m.kx.copy_(kx)
+                m.ky.copy_(ky)
             if a.z != 64.0:
                 m.net.H = p2.transfer(a.L, a.L, a.z)
         elif a.method == "gru":

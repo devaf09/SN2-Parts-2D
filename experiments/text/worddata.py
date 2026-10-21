@@ -103,3 +103,31 @@ def ngram(info, order, n):
         ce -= math.log((c.get(y, 0) + 0.1) / (tot + 0.1 * C))
     m = len(info["te_pairs"])
     return 100.0 * acc / m, ce / m, 100.0 * top5 / m
+
+
+def embed_layout(info, L, window=2, dims=64):
+    """入力の語を、意味（使われ方）が近い語ほど近い光の向きに並べる（実験60）。
+    前後 window 語の共起 → PPMI → SVD で語のベクトルを作り、第 2 成分の順に L 行へ、各行の中を第 3 成分の順に並べる。
+    戻り値: kx, ky（長さ V の float テンソル）と語のベクトル E (V, dims)。"""
+    V, idx = info["V_in"], info["in_idx"]
+    co = torch.zeros(V, V)
+    for d in info["tr_docs"]:
+        ids = [idx.get(w, info["OTHER"]) for w in d]
+        for i, a in enumerate(ids):
+            for b in ids[max(0, i - window):i]:
+                co[a, b] += 1
+                co[b, a] += 1
+    co += 0.01
+    tot = co.sum()
+    pmi = torch.log(co * tot / (co.sum(1, keepdim=True) * co.sum(0, keepdim=True))).clamp(min=0)
+    U, S, _ = torch.linalg.svd(pmi)
+    E = U[:, :dims] * S[:dims].sqrt()
+    order = E[:, 1].argsort()                       # 第 0 成分はほぼ頻度なので使わない
+    kx, ky = torch.zeros(V), torch.zeros(V)
+    per = -(-V // L)
+    for r in range(L):
+        rows = order[r * per:(r + 1) * per]
+        rows = rows[E[rows, 2].argsort()]
+        for c, w in enumerate(rows.tolist()):
+            ky[w], kx[w] = float(r), float(c)
+    return kx, ky, E
