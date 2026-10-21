@@ -29,6 +29,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import sn2_parts_2d as p2  # noqa: E402
+import textdata  # noqa: E402
 import worddata  # noqa: E402
 from exp40_inputs import EncNet  # noqa: E402
 from exp52_words import PROMPTS  # noqa: E402
@@ -36,6 +37,8 @@ from exp52_words import PROMPTS  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--task", default="word", choices=["word", "char"], help="char = 文字の課題（実験62。直前 8 文字、64 クラス、入力 512 字）")
+    ap.add_argument("--m", type=int, default=2, help="各 2DTG に見せる直前の単位の数（実験62）")
     ap.add_argument("--G", type=int, default=8, help="2DTG の数（グループの数）")
     ap.add_argument("--layers", type=int, default=16)
     ap.add_argument("--patches", type=int, default=16)
@@ -50,15 +53,22 @@ def main():
     ap.add_argument("--out", default="results/exp58.txt")
     a = ap.parse_args()
     dev = torch.device(a.device)
-    n, C, G = 4, a.C, a.G
-    (X, y), (Xt, yt), info = worddata.load(n, C, a.max_train, 10000, a.seed, a.V)
-    pair = lambda Z: Z[:, -2:]                       # (2 語前, 直前)
+    G = a.G
+    if a.task == "word":
+        n, C = 4, a.C
+        (X, y), (Xt, yt), info = worddata.load(n, C, a.max_train, 10000, a.seed, a.V)
+    else:
+        n = 8
+        (X, y), (Xt, yt), info = textdata.load(n, 64, a.max_train, 10000, a.seed)
+        C, a.V = info["C"], info["V_in"]
+        a.C = C
+    pair = lambda Z: Z[:, -a.m:]                     # 直前 m 単位（既定: 2 語前, 直前）
     grp, grpt = X[:, -1] % G, Xt[:, -1] % G
     grains, t_all, per = [], 0.0, []
     for gi in range(G):
         own, other = (grp == gi).nonzero().squeeze(1), (grp != gi).nonzero().squeeze(1)
         torch.manual_seed(a.seed * 100 + gi)
-        m = EncNet("bands", 2, a.V, C + 1, a.layers, a.patches, a.seed * 100 + gi, a.K).to(dev)
+        m = EncNet("bands", a.m, a.V, C + 1, a.layers, a.patches, a.seed * 100 + gi, a.K).to(dev)
         opt = torch.optim.Adam(m.parameters(), lr=0.01)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
         g = torch.Generator().manual_seed(a.seed * 100 + gi)
@@ -103,7 +113,7 @@ def main():
                         reject_on_other=100.0 * (P[gi][~mk].argmax(1) == C).float().mean().item()))
     res = dict(add=ev(add, yt), route=ev(route, yt), responsibility_correct=100.0 * (chosen == grpt).float().mean().item())
     demo = {}
-    for ptxt in PROMPTS:
+    for ptxt in (PROMPTS if a.task == "word" else []):
         xp, ws = worddata.encode_prompt(ptxt, info, n)
         pp = probs(xp)
         r = 1 - pp[:, :, C]
