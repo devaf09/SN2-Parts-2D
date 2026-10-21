@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--C", type=int, default=1024)
     ap.add_argument("--V", type=int, default=4096)
     ap.add_argument("--layers", type=int, default=32)
+    ap.add_argument("--z", type=float, default=64.0, help="板の間隔（実験59: 厚いホログラムに近づける）")
     ap.add_argument("--L", type=int, default=64, help="場の大きさ（実験56: 大きくして頭打ちを確かめる）")
     ap.add_argument("--patches", type=int, default=16)
     ap.add_argument("--K", type=int, default=256)
@@ -70,6 +71,8 @@ def main():
         torch.manual_seed(a.seed)
         if a.method == "plates":
             m = EncNet("bands", a.n, a.V, a.C, a.layers, a.patches, a.seed, a.K)
+            if a.z != 64.0:
+                m.net.H = p2.transfer(a.L, a.L, a.z)
         elif a.method == "gru":
             m = GRU(a.V, a.C)
         else:
