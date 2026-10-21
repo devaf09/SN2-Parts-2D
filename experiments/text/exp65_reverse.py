@@ -69,9 +69,13 @@ def main():
             truth = cnt[t]
             if truth.sum() < 50:
                 continue
-            code = m.codes[t, :K].clamp(min=0)
-            A = (code[:, None, None] * net.det).sum(0)                   # 出口に置く明るさ
-            u = torch.sqrt(A).to(torch.complex64)
+            if a.read == "int_phase":   # 位相差も読んだ光路: 符号の Re・Im の部分から、出口の光を位相つきで作る（実験65b）
+                cre, cim = m.codes[t, K:2 * K], m.codes[t, 2 * K:3 * K]
+                u = ((cre[:, None, None] + 1j * cim[:, None, None]) * net.det).sum(0).to(torch.complex64)
+            else:
+                code = m.codes[t, :K].clamp(min=0)
+                A = (code[:, None, None] * net.det).sum(0)               # 出口に置く明るさ
+                u = torch.sqrt(A).to(torch.complex64)
             u = torch.fft.ifft2(torch.fft.ifftshift(u, dim=(-2, -1)), norm="ortho")    # レンズの逆
             for d in reversed(range(D)):
                 u = torch.fft.ifft2(torch.fft.fft2(u) * net.H.conj())    # 回折の逆
