@@ -34,21 +34,33 @@ GROUP = {"私": "私", "わたし": "私", "わたくし": "わたくし", "あ�
          "わらわ": "わらわ", "あっし": "あっし", "わっし": "あっし", "わちき": "わちき", "我々": "我々", "私たち": "我々"}
 
 
-def load(n=12, V=512, seed=0):
+def mask(u):
+    for p in sorted(ad.FIRST, key=len, reverse=True):
+        u = u.replace(p, "＊")
+    return u
+
+
+def load(n=12, V=512, seed=0, aug=0):
+    """aug > 0: 訓練の会話文から、話者を変えた水増しを 1 文あたり aug 通り作って足す（aozora_aug.py、実験72）。テストは本物だけ。"""
     ws = ad.works()
     data = []
     for wi, w in enumerate(ws):
         for u in ad.utterances(w["text"]):
             l = ad.label(u)
             if l:
-                for p in sorted(ad.FIRST, key=len, reverse=True):
-                    u = u.replace(p, "＊")
                 data.append((wi, u, GROUP.get(l, l)))
     ids = list(range(len(ws)))
     random.Random(0).shuffle(ids)
-    te_w = set(ids[:30])
+    te_w = set(ids[:30] if len(ws) <= 150 else ids[:len(ws) * 15 // 100])
     tr = [d for d in data if d[0] not in te_w]
-    te = [d for d in data if d[0] in te_w]
+    te = [(wi, mask(u), g) for wi, u, g in data if wi in te_w]
+    n_aug, aug_stat = 0, {}
+    if aug:
+        import aozora_aug
+        extra, aug_stat = aozora_aug.build([(u, g) for _, u, g in tr], seed=seed, per_item=aug)
+        n_aug = len(extra)
+        tr = tr + [(-1, v, g) for v, g in extra]
+    tr = [(wi, mask(u), g) for wi, u, g in tr]
     classes = [g for g, _ in Counter(g for _, _, g in tr).most_common()]
     ci = {g: i for i, g in enumerate(classes)}
     chars = [c for c, _ in Counter(c for _, u, _ in tr for c in u).most_common(V - 2)]
@@ -59,12 +71,13 @@ def load(n=12, V=512, seed=0):
         X = torch.tensor([[PAD] * max(0, n - len(u)) + [vi.get(c, OTHER) for c in u[-n:]] for _, u, _ in ds])
         y = torch.tensor([ci[g] for _, _, g in ds])
         return X, y
-    return enc(tr), enc(te), dict(classes=classes, n_train=len(tr), n_test=len(te), V=V)
+    return enc(tr), enc(te), dict(classes=classes, n_train=len(tr), n_test=len(te), V=V, n_aug=n_aug, aug_stat=dict(aug_stat), tr=tr, te=te)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", default="plates", choices=["plates", "logreg"])
+    ap.add_argument("--method", default="plates", choices=["plates", "logreg", "nb"])
+    ap.add_argument("--aug", type=int, default=0, help="話者を変えた水増し（1 文あたりの数、実験72）")
     ap.add_argument("--n", type=int, default=12)
     ap.add_argument("--layers", type=int, default=32)
     ap.add_argument("--patches", type=int, default=16)
@@ -74,8 +87,25 @@ def main():
     ap.add_argument("--out", default="results/exp71.txt")
     a = ap.parse_args()
     dev = torch.device(a.device)
-    (X, y), (Xt, yt), info = load(a.n)
+    (X, y), (Xt, yt), info = load(a.n, seed=a.seed, aug=a.aug)
     C = len(info["classes"])
+    if a.method == "nb":   # 数えた表のナイーブベイズ（語尾 1〜3 文字 + 文字の 2 つ組の袋、会話文の全体）
+        import math
+        feats = lambda u: ["E" + u[-k:] for k in (1, 2, 3)] + [u[i:i + 2] for i in range(len(u) - 1)]
+        cls = Counter(g for _, _, g in info["tr"])
+        Fq = {g: Counter() for g in cls}
+        for _, u, g in info["tr"]:
+            Fq[g].update(feats(u))
+        tot = {g: sum(Fq[g].values()) for g in cls}
+        Vf = len({f for g in Fq for f in Fq[g]})
+        pred = [max(cls, key=lambda g: math.log(cls[g]) + sum(math.log((Fq[g][f] + 0.5) / (tot[g] + 0.5 * Vf)) for f in feats(u))) for _, u, _ in info["te"]]
+        acc = 100.0 * sum(p == g for p, (_, _, g) in zip(pred, info["te"])) / len(pred)
+        rec = dict(exp="71", **vars(a), classes=info["classes"], n_train=info["n_train"], n_test=info["n_test"], n_aug=info["n_aug"],
+                   aug_stat=info["aug_stat"], test_acc=acc, majority=100.0 * (yt == 0).float().mean().item())
+        print(json.dumps(rec, ensure_ascii=False))
+        with open(a.out, "a", encoding="utf-8") as fo:
+            fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return
     torch.manual_seed(a.seed)
     m = (EncNet("bands", a.n, info["V"], C, a.layers, a.patches, a.seed) if a.method == "plates" else LogReg(info["V"], C, a.n)).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=0.01 if a.method == "plates" else 0.003)
@@ -96,7 +126,7 @@ def main():
     pred = S.argmax(1)
     conf = torch.zeros(C, C, dtype=torch.long)
     conf.index_put_((yt, pred), torch.ones(len(yt), dtype=torch.long), accumulate=True)
-    rec = dict(exp="71", **vars(a), classes=info["classes"], n_train=info["n_train"], n_test=info["n_test"],
+    rec = dict(exp="71", **vars(a), classes=info["classes"], n_train=info["n_train"], n_test=info["n_test"], n_aug=info["n_aug"], aug_stat=info["aug_stat"],
                test_acc=100.0 * (pred == yt).float().mean().item(), test_ce=F.cross_entropy(S, yt).item(),
                train_acc=100.0 * (Str.argmax(1) == y).float().mean().item(),
                majority=100.0 * (yt == 0).float().mean().item(), confusion=conf.tolist(),
