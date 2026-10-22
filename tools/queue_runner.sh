@@ -12,7 +12,8 @@ DONE=results/queue_done.txt
 LOG=results/queue_runner.log
 touch "$Q" "$DONE"
 if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then exit 0; fi
-if powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { \$_.CommandLine -match 'experiments' } | Select-Object -First 1" | grep -q .; then exit 0; fi
+# 実験の python か、手で起動した sweep の bash が動いていれば待つ
+if powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { (\$_.Name -eq 'python.exe' -and \$_.CommandLine -match 'experiments') -or (\$_.Name -eq 'bash.exe' -and \$_.CommandLine -match 'sweeps[/\\]sweep') } | Select-Object -First 1" | grep -q .; then exit 0; fi
 echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 while true; do
