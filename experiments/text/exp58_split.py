@@ -47,7 +47,9 @@ def main():
     ap.add_argument("--K", type=int, default=256)
     ap.add_argument("--C", type=int, default=1024)
     ap.add_argument("--V", type=int, default=4096)
-    ap.add_argument("--reject", type=float, default=0.3, help="1 バッチのうち担当外の文脈の割合")
+    ap.add_argument("--reject", type=float, default=0.3, help="1 バッチのうち担当外の文脈の割合（0 なら担当なしを学ばず、担当は直前の語で決め打ち = route で読む、実験70）")
+    ap.add_argument("--assign", default="mod", choices=["mod", "freq"], help="担当の分け方。mod = 直前の語の番号の余り、freq = よく出る語 own 個は専用の 2DTG、残りを G − own 個で共有（実験70）")
+    ap.add_argument("--own", type=int, default=0, help="--assign freq のとき、専用の 2DTG を持つよく出る語の数")
     ap.add_argument("--max_train", type=int, default=400000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
@@ -71,7 +73,13 @@ def main():
         C, a.V = info["C"], info["V_in"]
         a.C = C
     pair = lambda Z: Z[:, -a.m:]                     # 直前 m 単位（既定: 2 語前, 直前）
-    grp, grpt = X[:, -1] % G, Xt[:, -1] % G
+    if a.assign == "freq":   # 訓練での出現回数の順に、上位 own 語は専用、残りは余りで G − own 個に共有
+        rank = torch.empty(a.V, dtype=torch.long)
+        rank[torch.bincount(X[:, -1], minlength=a.V).argsort(descending=True)] = torch.arange(a.V)
+        gmap = torch.where(rank < a.own, rank, a.own + rank % (G - a.own))
+    else:
+        gmap = torch.arange(a.V) % G
+    grp, grpt = gmap[X[:, -1]], gmap[Xt[:, -1]]
     grains, t_all, per = [], 0.0, []
     for gi in range(G):
         own, other = (grp == gi).nonzero().squeeze(1), (grp != gi).nonzero().squeeze(1)
@@ -88,7 +96,7 @@ def main():
         t0 = time.perf_counter()
         for step in range(a.steps):
             io = own[torch.randint(len(own), (256 - nr,), generator=g)]
-            ir = other[torch.randint(len(other), (nr,), generator=g)]
+            ir = other[torch.randint(len(other), (nr,), generator=g)] if nr else other[:0]
             xb = torch.cat([X[io], X[ir]])
             yb = torch.cat([y[io], torch.full((nr,), C)])
             loss = F.cross_entropy(m(pair(xb).to(dev)), yb.to(dev))
@@ -133,7 +141,7 @@ def main():
         q = q / q.sum()
         v, i = q.topk(5)
         demo[ptxt] = dict(words=ws, top5=[(info["out_vocab"][j], round(100 * float(x), 1)) for x, j in zip(v, i)])
-    rec = dict(exp="58", **vars(a), results=res, per_grain=per, test_acc=res["add"]["acc"], test_ce=res["add"]["ce"], test_top5=res["add"]["top5"],
+    rec = dict(exp="58", **vars(a), results=res, per_grain=per, test_acc=res["add" if a.reject > 0 else "route"]["acc"], test_ce=res["add" if a.reject > 0 else "route"]["ce"], test_top5=res["add" if a.reject > 0 else "route"]["top5"],
                params=sum(p.numel() for m in grains for p in m.parameters() if p.requires_grad), digital_code_params=sum(m.codes.numel() for m in grains if m.codes.requires_grad), train_s=t_all, demo=demo,
                version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
