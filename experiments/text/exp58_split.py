@@ -29,6 +29,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import sn2_parts_2d as p2  # noqa: E402
+import spdata  # noqa: E402
 import textdata  # noqa: E402
 import worddata  # noqa: E402
 from exp40_inputs import EncNet  # noqa: E402
@@ -37,7 +38,7 @@ from exp52_words import PROMPTS  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--task", default="word", choices=["word", "char"], help="char = 文字の課題（実験62。直前 8 文字、64 クラス、入力 512 字）")
+    ap.add_argument("--task", default="word", choices=["word", "char", "sp"], help="char = 文字の課題（実験62。直前 8 文字、64 クラス、入力 512 字）。sp = サブワード（SentencePiece、--V が語彙、実験69）")
     ap.add_argument("--m", type=int, default=2, help="各 2DTG に見せる直前の単位の数（実験62）")
     ap.add_argument("--fixed_codes", action="store_true", help="符号を学習せず、全部の 2DTG で同じでたらめな符号にする（デジタルの重みを増やさない対照、実験64）")
     ap.add_argument("--G", type=int, default=8, help="2DTG の数（グループの数）")
@@ -58,6 +59,12 @@ def main():
     if a.task == "word":
         n, C = 4, a.C
         (X, y), (Xt, yt), info = worddata.load(n, C, a.max_train, 10000, a.seed, a.V)
+    elif a.task == "sp":   # サブワード: 語彙 V（その他なし）。答えも V 種類
+        n = 4
+        (X, y), (Xt, yt), info = spdata.load(n, a.V, a.max_train, 10000, a.seed)
+        C, a.C = info["C"], info["C"]
+        a.V = info["V_in"]
+        info["out_vocab"] = info["pieces"]
     else:
         n = 8
         (X, y), (Xt, yt), info = textdata.load(n, 64, a.max_train, 10000, a.seed)
@@ -118,8 +125,8 @@ def main():
                         reject_on_other=100.0 * (P[gi][~mk].argmax(1) == C).float().mean().item()))
     res = dict(add=ev(add, yt), route=ev(route, yt), responsibility_correct=100.0 * (chosen == grpt).float().mean().item())
     demo = {}
-    for ptxt in (PROMPTS if a.task == "word" else []):
-        xp, ws = worddata.encode_prompt(ptxt, info, n)
+    for ptxt in (PROMPTS if a.task in ("word", "sp") else []):
+        xp, ws = (worddata if a.task == "word" else spdata).encode_prompt(ptxt, info, n)
         pp = probs(xp)
         r = 1 - pp[:, :, C]
         q = (pp[:, :, :C] * r[..., None]).sum(0)[0]
