@@ -1,0 +1,8 @@
+python experiments/text/exp58_split.py --G 16 --layers 8 --K 32 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --G 16 --layers 8 --K 32 --reject 0 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --assign freq --own 48 --G 64 --layers 2 --K 32 --reject 0 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --assign freq --own 48 --G 64 --layers 2 --K 32 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --assign freq --own 12 --G 16 --layers 8 --K 32 --reject 0 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --task char --m 4 --G 16 --layers 8 --K 32 --max_train 600000 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --task char --m 4 --G 16 --layers 8 --K 32 --reject 0 --max_train 600000 --seed 0 --device cuda --out results/exp70.txt
+python experiments/text/exp58_split.py --task char --m 4 --assign freq --own 48 --G 64 --layers 2 --K 32 --reject 0 --max_train 600000 --seed 0 --device cuda --out results/exp70.txt

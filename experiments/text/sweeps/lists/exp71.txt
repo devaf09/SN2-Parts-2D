@@ -1,0 +1,6 @@
+python experiments/text/exp71_wig.py --method plates --seed 0 --device cuda
+python experiments/text/exp71_wig.py --method logreg --seed 0 --device cuda
+python experiments/text/exp71_wig.py --method plates --seed 1 --device cuda
+python experiments/text/exp71_wig.py --method logreg --seed 1 --device cuda
+python experiments/text/exp71_wig.py --method plates --seed 2 --device cuda
+python experiments/text/exp71_wig.py --method logreg --seed 2 --device cuda
