@@ -1,1 +1,2 @@
 experiments/text/sweeps/resume70_71.sh
+experiments/text/sweeps/sweep72.sh
