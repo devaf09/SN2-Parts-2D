@@ -11,6 +11,8 @@
   thresh : a = √(softplus(k·(I − t)) / k)（t を学習、k = 8）、位相は 0（しきい値より暗い光を切る）
   kerr   : u' = u · exp(j·κ·I)（κ を学習）。明るさは変えず、明るい所ほど位相を遅らせる（光カー効果・自己位相変調）。位相の情報を捨てない唯一の候補
   ssat   : u' = u / √(1 + I/s)（s を学習）、位相はそのまま（可飽和吸収を、位相を残して）
+  fold   : a = |I − t|（t を学習）、位相は 0。しきい値より暗い分を折り返して明るさに変える（持ち主の案「しきい値以下を反転」、V 字）
+  signed : a = I − t（t を学習）。しきい値より暗い所は振幅が負 = 位相が π（反対向きの光）になる（持ち主の案「反転」のもう 1 つの読み方）
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ import torch.nn.functional as F
 
 import sn2_parts_2d as p2
 
-KINDS = ("none", "sqrt", "square", "log", "power", "sat", "thresh", "kerr", "ssat")
+KINDS = ("none", "sqrt", "square", "log", "power", "sat", "thresh", "kerr", "ssat", "fold", "signed")
 
 
 class NL(torch.nn.Module):
@@ -31,8 +33,8 @@ class NL(torch.nn.Module):
         super().__init__()
         assert kind in KINDS, kind
         self.kind = kind
-        init = {"power": 0.5, "sat": 1.0, "thresh": 0.5, "kerr": 1.0, "ssat": 1.0}.get(kind, 0.0)
-        self.p = torch.nn.Parameter(torch.tensor(float(init)), requires_grad=kind in ("power", "sat", "thresh", "kerr", "ssat"))
+        init = {"power": 0.5, "sat": 1.0, "thresh": 0.5, "kerr": 1.0, "ssat": 1.0, "fold": 0.5, "signed": 0.5}.get(kind, 0.0)
+        self.p = torch.nn.Parameter(torch.tensor(float(init)), requires_grad=kind in ("power", "sat", "thresh", "kerr", "ssat", "fold", "signed"))
 
     def amplitude(self, I):
         """明るさ I（平均 1）→ 出し直す振幅（位相 0 の候補だけ）。図にも使う。"""
@@ -49,6 +51,10 @@ class NL(torch.nn.Module):
             return (I / (1 + I / self.p.abs().clamp(min=1e-3))).clamp(min=0).sqrt()
         if k == "thresh":
             return (F.softplus(8.0 * (I - self.p)) / 8.0).sqrt()
+        if k == "fold":
+            return (I - self.p).abs()
+        if k == "signed":
+            return I - self.p
         raise ValueError(k)
 
     def forward(self, u):

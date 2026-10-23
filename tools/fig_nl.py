@@ -21,13 +21,13 @@ import nl_parts as nl  # noqa: E402
 import sn2_parts_2d as p2  # noqa: E402
 
 NAMES = {"none": "なし", "sqrt": "平方根", "square": "2 乗", "log": "対数", "power": "べき（学習）", "sat": "可飽和（学習）",
-         "thresh": "しきい値（学習）", "kerr": "カー効果（位相、学習）", "ssat": "可飽和・位相を残す（学習）"}
+         "thresh": "しきい値（学習）", "kerr": "カー効果（位相、学習）", "ssat": "可飽和・位相を残す（学習）", "fold": "しきい値以下を折り返す（学習）", "signed": "しきい値以下を反転・位相 π（学習）"}
 
 
 def curves(path):
     I = torch.linspace(0, 4, 200)
     fig, ax = plt.subplots(1, 2, figsize=(13, 4.6))
-    for k in ("sqrt", "square", "log", "power", "sat", "thresh"):
+    for k in ("sqrt", "square", "log", "power", "sat", "thresh", "fold", "signed"):
         ax[0].plot(I, nl.NL(k).amplitude(I).detach(), label=NAMES[k])
     ax[0].plot(I, I.sqrt() * 0 + 1, "k:", lw=0.8)
     ax[0].set_xlabel("明るさ I（平均 1）")
