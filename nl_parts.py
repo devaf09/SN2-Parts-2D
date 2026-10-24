@@ -13,6 +13,8 @@
   ssat   : u' = u / √(1 + I/s)（s を学習）、位相はそのまま（可飽和吸収を、位相を残して）
   fold   : a = |I − t|（t を学習）、位相は 0。しきい値より暗い分を折り返して明るさに変える（持ち主の案「しきい値以下を反転」、V 字）
   signed : a = I − t（t を学習）。しきい値より暗い所は振幅が負 = 位相が π（反対向きの光）になる（持ち主の案「反転」のもう 1 つの読み方）
+  kerrn  : u' = u · exp(j·κ·I / max I)（κ を学習、実験77）。位相の遅れを、いちばん明るい所で κ に抑える（明るい点で位相が何周も回るのを防ぐ）
+  phfrac : u' = |u| · exp(j·p·φ)（p を学習、実験77）。振幅はそのまま、位相を p 倍に縮める。p = 0 で sqrt と同じ（√I = |u|、位相を捨てる）、p = 1 で何もしない
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ import torch.nn.functional as F
 
 import sn2_parts_2d as p2
 
-KINDS = ("none", "sqrt", "square", "log", "power", "sat", "thresh", "kerr", "ssat", "fold", "signed")
+KINDS = ("none", "sqrt", "square", "log", "power", "sat", "thresh", "kerr", "ssat", "fold", "signed", "kerrn", "phfrac")
 
 
 class NL(torch.nn.Module):
@@ -33,8 +35,8 @@ class NL(torch.nn.Module):
         super().__init__()
         assert kind in KINDS, kind
         self.kind = kind
-        init = {"power": 0.5, "sat": 1.0, "thresh": 0.5, "kerr": 1.0, "ssat": 1.0, "fold": 0.5, "signed": 0.5}.get(kind, 0.0)
-        self.p = torch.nn.Parameter(torch.tensor(float(init)), requires_grad=kind in ("power", "sat", "thresh", "kerr", "ssat", "fold", "signed"))
+        init = {"power": 0.5, "sat": 1.0, "thresh": 0.5, "kerr": 1.0, "ssat": 1.0, "fold": 0.5, "signed": 0.5, "kerrn": 1.0, "phfrac": 0.5}.get(kind, 0.0)
+        self.p = torch.nn.Parameter(torch.tensor(float(init)), requires_grad=kind in ("power", "sat", "thresh", "kerr", "ssat", "fold", "signed", "kerrn", "phfrac"))
 
     def amplitude(self, I):
         """明るさ I（平均 1）→ 出し直す振幅（位相 0 の候補だけ）。図にも使う。"""
@@ -64,6 +66,10 @@ class NL(torch.nn.Module):
         I = I / (I.mean((-2, -1), keepdim=True) + 1e-12)
         if self.kind == "kerr":
             return u * torch.polar(torch.ones_like(I), self.p * I)
+        if self.kind == "kerrn":
+            return u * torch.polar(torch.ones_like(I), self.p * I / I.amax((-2, -1), keepdim=True))
+        if self.kind == "phfrac":
+            return p2.normalize(torch.polar(u.abs(), self.p * torch.angle(u)))
         if self.kind == "ssat":
             return u / (1 + I / self.p.abs().clamp(min=1e-3)).sqrt()
         return p2.normalize(self.amplitude(I).to(torch.complex64))

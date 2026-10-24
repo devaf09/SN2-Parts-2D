@@ -78,6 +78,9 @@ def main():
     ap.add_argument("--read", default="lens", choices=["lens", "plane"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=3000)
+    ap.add_argument("--fix_p", type=float, default=None, help="非線形の数を固定（学習しない、実験77）")
+    ap.add_argument("--lr", type=float, default=0.01)
+    ap.add_argument("--clip", type=float, default=0.0, help="勾配の大きさの上限（0 = なし）")
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp75.txt")
@@ -94,8 +97,13 @@ def main():
         C = int(y.max()) + 1
     torch.manual_seed(a.seed)
     m = Multi4f(64, C, a.stages, a.width, a.kind, a.read, a.seed).to(dev)
+    if a.fix_p is not None:
+        for q in m.nls:
+            q.p.data.fill_(a.fix_p)
+            q.p.requires_grad_(False)
     to_in = lambda x: p2.image_to_field(x, "amp")
-    opt = torch.optim.Adam(m.parameters(), lr=0.01)
+    opt = torch.optim.Adam([q for q in m.parameters() if q.requires_grad], lr=a.lr)
+    gn = []
     sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     g = torch.Generator().manual_seed(a.seed)
     t0 = time.perf_counter()
@@ -104,6 +112,7 @@ def main():
         loss = F.cross_entropy(m(to_in(X[i].to(dev))), y[i].to(dev))
         opt.zero_grad()
         loss.backward()
+        gn.append(float(torch.nn.utils.clip_grad_norm_(m.parameters(), a.clip if a.clip > 0 else 1e9)))
         opt.step()
         sch.step()
     if dev.type == "cuda":
@@ -116,7 +125,17 @@ def main():
         return 100.0 * (S.argmax(1) == yy).float().mean().item(), F.cross_entropy(S, yy).item()
     acc, ce = ev(Xt, yt)
     tr_acc, _ = ev(X[:5000], y[:5000])
+    # 失敗の理由を探る（実験77）: 入力を 2 画素ずらしたときの正解率と、出口の明るさの変わり方（cos の近さ）
+    acc_shift2, _ = ev(torch.roll(Xt, (2, 2), (-2, -1)), yt)
+    with torch.no_grad():
+        x0 = to_in(Xt[:250].to(dev))
+        s0, s1 = m.screen(x0).flatten(1), m.screen(torch.roll(x0, (1, 1), (-2, -1))).flatten(1)
+        cos_shift1 = float(F.cosine_similarity(s0, s1).mean())
+        n0 = 1e-3 * torch.randn_like(x0.real)
+        cos_noise = float(F.cosine_similarity(s0, m.screen(p2.normalize(x0 + n0)).flatten(1)).mean())
     rec = dict(exp="75", **vars(a), test_acc=acc, test_ce=ce, train_acc=tr_acc, train_s=train_s,
+               acc_shift2=acc_shift2, cos_shift1=cos_shift1, cos_noise=cos_noise,
+               grad_norm_med=float(torch.tensor(gn).median()), grad_norm_max=max(gn),
                params=sum(p.numel() for p in m.parameters() if p.requires_grad), nl_params=[float(q.p.detach()) for q in m.nls],
                version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
