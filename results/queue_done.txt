@@ -5,3 +5,4 @@ experiments/sweeps_exp74.sh
 experiments/sweeps_exp75.sh
 experiments/sweeps_exp76.sh
 experiments/sweeps_exp77.sh
+experiments/text/sweeps/sweep78.sh
