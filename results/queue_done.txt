@@ -3,3 +3,4 @@ experiments/text/sweeps/sweep72.sh
 experiments/run_exp73_after_metasequoia.sh
 experiments/sweeps_exp74.sh
 experiments/sweeps_exp75.sh
+experiments/sweeps_exp76.sh
