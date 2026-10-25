@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp78.txt")
+    ap.add_argument("--save_logits", default="", help="テストの対数確率を保存（足し合わせのため、実験81）")
     a = ap.parse_args()
     dev = torch.device(a.device)
     torch.manual_seed(a.seed)
@@ -85,6 +86,11 @@ def main():
             S = torch.cat([m(XX[j:j + 250].to(dev)).cpu() for j in range(0, len(yy), 250)])
         return 100.0 * (S.argmax(1) == yy).float().mean().item(), F.cross_entropy(S, yy).item()
     acc, ce = ev(Xt, yt)
+    if a.save_logits:
+        with torch.no_grad():
+            S = torch.cat([m(Xt[j:j + 250].to(dev)).cpu() for j in range(0, len(yt), 250)])
+        os.makedirs(os.path.dirname(a.save_logits), exist_ok=True)
+        torch.save({"logp": F.log_softmax(S, 1), "y": yt}, a.save_logits)
     tr_acc, _ = ev(X[:10000], y[:10000])
     rec = dict(exp="78", **vars(a), test_acc=acc, test_ce=ce, train_acc=tr_acc, train_s=train_s,
                params=sum(q.numel() for q in m.opt_params()), nl_params=[float(q.p.detach()) for q in m.body.nls],

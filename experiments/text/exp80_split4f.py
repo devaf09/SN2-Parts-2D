@@ -40,6 +40,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="results/exp80.txt")
+    ap.add_argument("--save_logits", default="", help="テストの対数確率を保存（足し合わせのため、実験81）")
     a = ap.parse_args()
     dev = torch.device(a.device)
     (X, y), (Xt, yt), info = textdata.load(8, 64, 600000, 10000, a.seed)
@@ -77,6 +78,9 @@ def main():
     rec = dict(exp="80", **vars(a), test_acc=acc, test_ce=ce, train_acc=100.0 * tr_hit / max(1, tr_n), params=params, train_s=train_s,
                version=p2.__version__, torch=torch.__version__)
     print(json.dumps(rec, ensure_ascii=False))
+    if a.save_logits:
+        os.makedirs(os.path.dirname(a.save_logits), exist_ok=True)
+        torch.save({"logp": F.log_softmax(S, 1), "y": yt}, a.save_logits)
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     with open(a.out, "a", encoding="utf-8") as fo:
         fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
