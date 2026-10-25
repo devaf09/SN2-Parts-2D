@@ -9,3 +9,4 @@ experiments/text/sweeps/sweep78.sh
 experiments/text/sweeps/sweep79.sh
 experiments/text/sweeps/sweep80.sh
 experiments/text/sweeps/sweep81.sh
+experiments/text/sweeps/sweep82.sh
