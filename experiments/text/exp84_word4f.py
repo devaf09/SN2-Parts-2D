@@ -66,7 +66,7 @@ def main():
     ap.add_argument("--ngram", action="store_true", help="同じテストで単語の 2〜4-gram も測る（CPU）")
     a = ap.parse_args()
     dev = torch.device(a.device)
-    (X, y), (Xt, yt), info = worddata.load(4, a.C, a.max_train, 10000, a.seed, 4096)
+    (X, y), (Xt, yt), info = worddata.load(max(4, a.n), a.C, a.max_train, 10000, a.seed, 4096)
     V, C = info["V_in"], a.C
     X, Xt = X[:, -a.n:], Xt[:, -a.n:]
     grp, grpt = X[:, -1] % a.G, Xt[:, -1] % a.G
