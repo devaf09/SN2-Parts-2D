@@ -7,6 +7,7 @@
 """
 import itertools
 import json
+import os
 import sys
 
 import torch
@@ -15,6 +16,7 @@ import torch.nn.functional as F
 paths = sys.argv[1:]
 Ls = [torch.load(p) for p in paths]
 y = Ls[0]["y"]
+assert all(torch.equal(d["y"], y) for d in Ls), "テストの並びが違う"
 P = torch.stack([d["logp"] for d in Ls])
 half = len(y) // 2
 grid = torch.arange(0, 1.0001, 0.05)
@@ -25,18 +27,27 @@ def score(w, sl):
     return 100.0 * (lp.argmax(1) == y[sl]).float().mean().item(), F.nll_loss(lp, y[sl]).item()
 
 
-best = None
-for ws in itertools.product(grid, repeat=len(paths) - 1):
-    if sum(ws) > 1:
-        continue
-    w = torch.tensor(list(ws) + [1 - sum(ws)])
-    ce = score(w, slice(0, half))[1]
-    if best is None or ce < best[0]:
-        best = (ce, w)
-w = best[1]
-rec = dict(exp="81", files=paths, weights=[round(float(x), 2) for x in w],
-           alone=[score(torch.eye(len(paths))[i], slice(half, None)) for i in range(len(paths))],
-           fused=score(w, slice(half, None)))
+def choose(sl):
+    best = None
+    for ws in itertools.product(grid, repeat=len(paths) - 1):
+        if sum(ws) > 1 + 1e-6:
+            continue
+        w = torch.tensor(list(ws) + [1 - sum(ws)])
+        ce = score(w, sl)[1]
+        if best is None or ce < best[0]:
+            best = (ce, w)
+    return best[1]
+
+
+A, B = slice(0, half), slice(half, None)
+w = choose(A)
+# 2 つに分けて入れ替える（実験82）: 前半で選んで後半で測る・後半で選んで前半で測る、の平均 = テスト全部の値
+wB = choose(B)
+cross = [(score(w, B)[i] + score(wB, A)[i]) / 2 for i in range(2)]
+full = lambda i: score(torch.eye(len(paths))[i], slice(None))
+rec = dict(exp="81", files=paths, weights=[round(float(x), 2) for x in w], weights_B=[round(float(x), 2) for x in wB],
+           alone=[score(torch.eye(len(paths))[i], B) for i in range(len(paths))],
+           fused=score(w, B), alone_full=[full(i) for i in range(len(paths))], fused_cross=cross)
 print(json.dumps(rec, ensure_ascii=False))
-with open("results/exp81.txt", "a", encoding="utf-8") as fo:
+with open(os.environ.get("FUSE_OUT", "results/exp81.txt"), "a", encoding="utf-8") as fo:
     fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
