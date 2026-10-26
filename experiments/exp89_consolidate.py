@@ -11,6 +11,8 @@
   relate   : diff + 関連記憶（案 2）の簡単な形。長期から読んだときの確信度が高い組（今の記憶と関連が強い）ほど重く書く
   gated    : diff + 足りない分だけ書く繰り返し記憶。すでに確信度 2 以上で正しく取り出せる組は書く重みを 0.1 に（強度が上がりすぎて、ほかを埋もれさせない）
   gated_upd: gated + update
+  logdiff  : diff + 案 1 の手順（実験90）。差分マップ = log(前段の値の地図 + ε) − log(長期から読んだ地図 + ε)。値の窓の差分の大きさだけ書く
+  logdiff_soft: 同じ差分マップで、softmax(差分マップ + 現在の記憶) − 現在の記憶 を書く（引く窓もある）
   update   : diff + 上書き。長期から読んだ値が新しい値と違えば、古い値の窓を引く（読み出した光の差分を書く。不可逆で OK、持ち主）
 重要度（案 3）: 印の付いた組は、どの方法でも書く重みを 3 倍にする。
 測るもの: 最後に、出てきた全部の組を長期から取り出す正解率（最新の値が正解）。出てきた回数別・重要の印別・古さ別、
@@ -30,6 +32,7 @@ sys.path.insert(0, os.path.join(ROOT, "experiments"))
 from exp88_memkeys import K, L, cent, conf, make_keys, read  # noqa: E402
 
 P, T, M, LAM = 300, 60, 16, 0.97
+METHODS = ("plain", "diff", "repeat", "relate", "update", "gated", "gated_upd", "logdiff", "logdiff_soft")
 
 
 def wmap(d):
@@ -66,7 +69,7 @@ def run(kind, method, seed):
         w[important[idx]] *= 3.0
         d = torch.zeros(M, K)
         d[torch.arange(M), cur[idx]] = 1.0
-        if t > 0 and method in ("repeat", "relate", "update", "gated", "gated_upd"):
+        if t > 0 and method in ("repeat", "relate", "update", "gated", "gated_upd", "logdiff", "logdiff_soft"):
             S = read(H, kk)
             am = S.argmax(1)
             if method == "repeat":
@@ -74,6 +77,19 @@ def run(kind, method, seed):
             elif method == "relate":
                 _, mg = conf(S)
                 w = w * (1 + torch.log(mg).clamp(0, 2))
+            elif method in ("logdiff", "logdiff_soft"):
+                # 案 1 の手順（実験90 で追加）: 前段（短期）の値の地図 d と、現在（長期）から読んだ地図 p（窓の明るさを合計 1 に）の対数の差 = 差分マップ。
+                # 差分マップ log(d + ε) − log(p + ε) を、softmax（差分マップ + 現在の記憶）で窓ごとの書く量にして融合する。
+                # 長期がすでに値の窓を強く出していれば差分は小さく、書く量も小さい（「足りない分だけ書く」を対数で連続にした形）
+                pL = S / S.sum(1, keepdim=True)
+                eps = 1.0 / K
+                Dm = torch.log(d + eps) - torch.log(pL + eps)                    # 差分マップ（対数）
+                if method == "logdiff":
+                    a = (Dm[torch.arange(M), cur[idx]] / torch.log(torch.tensor(1.0 + K))).clamp(0, 1)
+                    w = w * a                                                   # 値の窓の差分の大きさだけ書く
+                else:
+                    q = torch.softmax(Dm + torch.log(pL + eps), 1)              # softmax(差分マップ + 現在の記憶)
+                    d = q - pL                                                  # 現在の記憶から q へ近づける分（引く窓もある）
             elif method in ("gated", "gated_upd"):
                 # 繰り返し記憶を「足りない分だけ書く」形に: すでに確信度 2 以上で正しく取り出せる組は書く重みを 0.1 にする（強度が上がりすぎない）
                 _, mg = conf(S)
@@ -107,7 +123,7 @@ def main():
     with open(os.path.join(ROOT, "results", "exp89.txt"), "a", encoding="utf-8") as out:
         for seed in range(3):
             for kind in ("rand", "word", "sim0.25", "sim0.5", "sim0.75"):
-                for method in ("plain", "diff", "repeat", "relate", "update", "gated", "gated_upd"):
+                for method in METHODS:
                     rec = dict(exp="89", seed=seed, keys=kind, method=method, **run(kind, method, seed))
                     out.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
