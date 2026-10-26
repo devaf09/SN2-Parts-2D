@@ -65,9 +65,34 @@ def word_keys(n_total, seed):
         return _word["enc"].field(X[i]).to(torch.complex64)
 
 
+def word_hash_keys(n_total, seed):
+    """単語の並びの鍵で、頻出語の外の語（〈他〉）を 1 つの印にまとめず、語の表記から決まる別々の向きにする（実験96）。"""
+    if "hashX" not in _word:
+        import zlib
+        import worddata
+        from exp40_inputs import EncNet
+        (_, _), (_, _), info = worddata.load(4, 1024, 1000, 10000, 0, 4096)
+        idx, V = info["in_idx"], info["V_in"]
+        rows = []
+        for ids, _, ctx, _ in info["te_pairs"]:
+            ctx = ["<始まり>"] * (4 - len(ctx)) + list(ctx)
+            rows.append([idx[w] if w in idx else (V - 1 if w == "<始まり>" else zlib.crc32(w.encode()) % (V - 2)) for w in ctx])
+        _word["hashX"] = torch.unique(torch.tensor(rows), dim=0)
+        if "enc" not in _word:
+            _word["enc"] = EncNet("spread", 4, V, 1024, 1, 8, 0)
+            _word["in_vocab"] = info["in_vocab"]
+    X = _word["hashX"]
+    i = torch.randperm(len(X), generator=torch.Generator().manual_seed(seed))[:n_total]
+    _word["last_X"] = X[i]
+    with torch.no_grad():
+        return _word["enc"].field(X[i]).to(torch.complex64)
+
+
 def make_keys(kind, n_total, g, seed):
     if kind == "word":
         return word_keys(n_total, seed)
+    if kind == "word_hash":
+        return word_hash_keys(n_total, seed)
     rnd = torch.polar(torch.ones(n_total, L, L), 2 * math.pi * torch.rand(n_total, L, L, generator=g))
     if kind == "rand":
         return rnd
