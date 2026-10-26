@@ -28,12 +28,15 @@ from exp91_series import write  # noqa: E402
 from exp93_shift import pick, widths  # noqa: E402
 
 
+LAST = {}          # 最後の run の中身（図のため）
+
+
 def unit(H):
     n = H.abs().pow(2).sum().sqrt()
     return H / n if n > 0 else H
 
 
-def run(keys_kind, seed, wkind, n_levels, fuse, nested):
+def run(keys_kind, seed, wkind, n_levels, fuse, nested, T=T):
     g = torch.Generator().manual_seed(seed)
     keys = make_keys(keys_kind, P, g, seed * 7 + 1)
     val = torch.randint(K, (P,), generator=g)
@@ -90,14 +93,27 @@ def run(keys_kind, seed, wkind, n_levels, fuse, nested):
     am, _, b = pick(allp, keys - kmean)
     hit = (am == cur) & seen
     Ss = torch.stack([read(H, keys - kmean) for H in allp])
-    oracle = ((Ss.argmax(-1) == cur[None]).any(0) & seen)               # どれかの段では正しく取り出せる（段の選び方が完全なら）
+    oracle = ((Ss.argmax(-1) == cur[None]).any(0) & seen)
+    # 段の選び方の比べ（実験95）: 確信度・新しい段を優先・全段の明るさを足す・全段の割合を足す（多数決）
+    top2 = Ss.topk(2, -1).values
+    mgs = top2[..., 0] / top2[..., 1].clamp(min=1e-12)                  # (段, 組)
+    lvl = torch.tensor([float(j) for j, (si, H) in enumerate([(si, H) for si, lv in enumerate(series) for H in lv if H.abs().sum() > 0])])
+    sel = {}
+    for nm, score in (("recent0.9", mgs * 0.9 ** lvl[:, None]), ("recent0.7", mgs * 0.7 ** lvl[:, None])):
+        bb = score.argmax(0)
+        sel[nm] = Ss.argmax(-1)[bb, torch.arange(len(cur))]
+    sel["sum"] = Ss.sum(0).argmax(-1)
+    sel["vote"] = (Ss / Ss.sum(-1, keepdim=True)).sum(0).argmax(-1)
+    sel["conf_sum"] = (Ss * (mgs[..., None] - 1).clamp(min=0)).sum(0).argmax(-1)   # 確信度で重みを付けて足す
+    LAST.update(series=series, amount=amount, keys=keys, kmean=kmean, cur=cur, seen=seen, chosen=b, Ss=Ss, idx_kind=keys_kind, W=W)               # どれかの段では正しく取り出せる（段の選び方が完全なら）
     age = (T - 1 - last).float()
     grp = lambda m_: float(100.0 * hit[m_ & seen].float().mean()) if (m_ & seen).any() else None
     ch = changed & seen & (last >= T // 2)
     return dict(acc=grp(seen), acc_once=grp(count == 1), acc_5up=grp(count >= 5), acc_important=grp(important),
                 acc_recent=grp(age < 10), acc_mid=grp((age >= 10) & (age < 30)), acc_old=grp(age >= 30),
                 changed_new=float(100.0 * (am == new_val)[ch].float().mean()) if ch.any() else None, n_plates=len(allp),
-                acc_oracle=float(100.0 * oracle[seen].float().mean()))
+                acc_oracle=float(100.0 * oracle[seen].float().mean()),
+                **{f"acc_sel_{k}": float(100.0 * ((v == cur) & seen)[seen].float().mean()) for k, v in sel.items()})
 
 
 def main():

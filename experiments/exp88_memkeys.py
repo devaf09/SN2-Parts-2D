@@ -57,8 +57,10 @@ def word_keys(n_total, seed):
         (_, _), (Xt, _), info = worddata.load(4, 1024, 1000, 10000, 0, 4096)
         _word["X"] = torch.unique(Xt, dim=0)
         _word["enc"] = EncNet("spread", 4, info["V_in"], 1024, 1, 8, 0)
+        _word["in_vocab"] = info["in_vocab"]
     X = _word["X"]
     i = torch.randperm(len(X), generator=torch.Generator().manual_seed(seed))[:n_total]
+    _word["last_X"] = X[i]                                   # 図のため: いま使った鍵の単語の番号
     with torch.no_grad():
         return _word["enc"].field(X[i]).to(torch.complex64)
 
