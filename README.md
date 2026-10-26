@@ -2,6 +2,8 @@
 
 画像のような 2 次元の入力を光の場にして、**模様のある透明な板と回折だけ**で処理する部品（Python の関数）を作っています。重み行列（ニューロンのマップ）は持ちません。
 
+> 📘 **目的別の使い方（そのまま試せるコマンドとコード・引数の説明）: [docs/recipes.md](docs/recipes.md)**　／　記憶の設計メモ: [docs/memory_design.md](docs/memory_design.md)　／　実験の記録: [NOTES.md](NOTES.md)
+
 > **版 0.11.0。画像認識（実験00〜30）と言語（実験31〜65）の区切り。** 一番良かった組み合わせは [docs/best_configs.md](docs/best_configs.md)、有望なアイディアは [docs/ideas.md](docs/ideas.md)、部品の評価は [docs/parts_review.md](docs/parts_review.md)、効率（光とデジタルの重さ）は [docs/efficiency.md](docs/efficiency.md)。
 
 ![10 本の光路の融合で、どこに何の数字があるかを出す](docs/images/exp30_ten.png)
