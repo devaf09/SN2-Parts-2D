@@ -22,7 +22,7 @@ import torch
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(ROOT, "experiments"))
-from exp88_memkeys import K, L, make_keys  # noqa: E402
+from exp88_memkeys import K, L, make_keys, read  # noqa: E402
 from exp89_consolidate import M, P, T  # noqa: E402
 from exp91_series import write  # noqa: E402
 from exp93_shift import pick, widths  # noqa: E402
@@ -89,12 +89,15 @@ def run(keys_kind, seed, wkind, n_levels, fuse, nested):
     allp = [H for lv in series for H in lv if H.abs().sum() > 0]
     am, _, b = pick(allp, keys - kmean)
     hit = (am == cur) & seen
+    Ss = torch.stack([read(H, keys - kmean) for H in allp])
+    oracle = ((Ss.argmax(-1) == cur[None]).any(0) & seen)               # どれかの段では正しく取り出せる（段の選び方が完全なら）
     age = (T - 1 - last).float()
     grp = lambda m_: float(100.0 * hit[m_ & seen].float().mean()) if (m_ & seen).any() else None
     ch = changed & seen & (last >= T // 2)
     return dict(acc=grp(seen), acc_once=grp(count == 1), acc_5up=grp(count >= 5), acc_important=grp(important),
                 acc_recent=grp(age < 10), acc_mid=grp((age >= 10) & (age < 30)), acc_old=grp(age >= 30),
-                changed_new=float(100.0 * (am == new_val)[ch].float().mean()) if ch.any() else None, n_plates=len(allp))
+                changed_new=float(100.0 * (am == new_val)[ch].float().mean()) if ch.any() else None, n_plates=len(allp),
+                acc_oracle=float(100.0 * oracle[seen].float().mean()))
 
 
 def main():
